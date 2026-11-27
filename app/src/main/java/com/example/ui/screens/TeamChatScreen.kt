@@ -38,8 +38,11 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -74,8 +77,11 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.ChatSenderRole
 import com.example.data.model.TeamChannel
 import com.example.data.model.TeamChannelKind
+import com.example.data.offline.TetheringRole
+import com.example.data.offline.TetheringUiState
 import com.example.ui.UiState
 import com.example.ui.components.CefrBadge
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.avatarColorForTag
 import com.example.ui.theme.AmberOnSoft
 import com.example.ui.theme.AmberSoft
@@ -110,6 +116,12 @@ fun TeamChatScreen(
     onSendMessage: (TeamChannel, text: String, pinned: Boolean) -> Unit,
     onTogglePin: (teamId: String, messageId: String, pinned: Boolean) -> Unit,
     onDeleteMessage: (teamId: String, messageId: String) -> Unit,
+    tetheringState: TetheringUiState = TetheringUiState(),
+    onHostTetheringTeam: (teamName: String, level: CefrLevel, motto: String) -> Unit = { _, _, _ -> },
+    onScanTetheringTeams: () -> Unit = {},
+    onJoinTetheringTeam: (hostIp: String, port: Int, teamCode: String) -> Unit = { _, _, _ -> },
+    onSendTetheringMessage: (text: String, pinned: Boolean) -> Unit = { _, _ -> },
+    onDisconnectTethering: () -> Unit = {},
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -125,6 +137,7 @@ fun TeamChatScreen(
     }
 
     var showCreateTeamDialog by remember { mutableStateOf(false) }
+    var showHotspotPanel by remember { mutableStateOf(tetheringState.role != TetheringRole.NONE) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val isWide = maxWidth >= 720.dp
@@ -186,6 +199,17 @@ fun TeamChatScreen(
                     Text("Team")
                 }
             }
+
+            TetheringHotspotPanel(
+                tetheringState = tetheringState,
+                expanded = showHotspotPanel || tetheringState.role != TetheringRole.NONE,
+                onToggleExpanded = { showHotspotPanel = !showHotspotPanel },
+                onHostTeam = onHostTetheringTeam,
+                onScanHosts = onScanTetheringTeams,
+                onJoinHost = onJoinTetheringTeam,
+                onSendHotspotMessage = onSendTetheringMessage,
+                onDisconnect = onDisconnectTethering
+            )
 
             when (teamsState) {
                 is UiState.Loading -> {
@@ -943,3 +967,245 @@ private fun CreateTeamDialog(
         }
     )
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TetheringHotspotPanel(
+    tetheringState: TetheringUiState,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onHostTeam: (teamName: String, level: CefrLevel, motto: String) -> Unit,
+    onScanHosts: () -> Unit,
+    onJoinHost: (hostIp: String, port: Int, teamCode: String) -> Unit,
+    onSendHotspotMessage: (text: String, pinned: Boolean) -> Unit,
+    onDisconnect: () -> Unit
+) {
+    var teamNameInput by remember { mutableStateOf("Hotspot Squad") }
+    var hostIpInput by remember { mutableStateOf("192.168.43.1") }
+    var codeInput by remember { mutableStateOf("") }
+    var msgDraft by remember { mutableStateOf("") }
+    val isConnected = tetheringState.role != TetheringRole.NONE
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isConnected) MintSoft else IndigoSoft.copy(alpha = 0.72f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag("tethering_hotspot_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggleExpanded() },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.WifiTethering,
+                        contentDescription = null,
+                        tint = if (isConnected) MintOnSoft else IndigoOnSoft
+                    )
+                    Column {
+                        Text(
+                            text = if (isConnected) {
+                                val roleLabel = if (tetheringState.role == TetheringRole.HOST) "Hosting Hotspot" else "Connected to Squad"
+                                "$roleLabel • ${tetheringState.activeTeam?.name ?: "Local"}"
+                            } else {
+                                "Wi-Fi Hotspot Squad (No Internet)"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isConnected) MintOnSoft else IndigoOnSoft
+                        )
+                        Text(
+                            text = tetheringState.statusNote.ifBlank { "Form a local team and play trivia with zero internet" },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = (if (isConnected) MintOnSoft else IndigoOnSoft).copy(alpha = 0.85f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (isConnected) {
+                    TextButton(onClick = onDisconnect) {
+                        Text("Leave", color = MintOnSoft, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Text(
+                        text = if (expanded) "Hide" else "Open",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = IndigoOnSoft
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!isConnected) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = teamNameInput,
+                                onValueChange = { teamNameInput = it.take(32) },
+                                label = { Text("Squad Name") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                onClick = {
+                                    onHostTeam(
+                                        teamNameInput.ifBlank { "Hotspot Squad" },
+                                        CefrLevel.B1,
+                                        "Offline Wi-Fi Hotspot Study"
+                                    )
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text("Host")
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = onScanHosts,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (tetheringState.isScanning) "Scanning..." else "Scan")
+                            }
+                            OutlinedTextField(
+                                value = hostIpInput,
+                                onValueChange = { hostIpInput = it.trim().take(30) },
+                                label = { Text("Host IP") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = codeInput,
+                                onValueChange = { codeInput = it.filter { c -> c.isDigit() }.take(4) },
+                                label = { Text("PIN") },
+                                singleLine = true,
+                                modifier = Modifier.width(76.dp)
+                            )
+                            Button(
+                                onClick = {
+                                    onJoinHost(hostIpInput, com.example.data.offline.TetheringHubManager.DEFAULT_TCP_PORT, codeInput)
+                                },
+                                enabled = hostIpInput.isNotBlank(),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Text("Join")
+                            }
+                        }
+
+                        if (tetheringState.discoveredHosts.isNotEmpty()) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                tetheringState.discoveredHosts.forEach { host ->
+                                    AssistChip(
+                                        onClick = {
+                                            hostIpInput = host.hostIp
+                                            codeInput = host.teamCode
+                                            onJoinHost(host.hostIp, host.port, host.teamCode)
+                                        },
+                                        label = { Text("Join ${host.teamName} (${host.hostIp})") }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        if (tetheringState.localIpAddresses.isNotEmpty()) {
+                            Text(
+                                text = "IP: ${tetheringState.localIpAddresses.joinToString()} • Code: ${tetheringState.teamCode} • Peers: ${tetheringState.connectedPeers.size}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MintOnSoft
+                            )
+                        }
+                        if (tetheringState.messages.isNotEmpty()) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                tetheringState.messages.takeLast(4).forEach { msg ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "${msg.senderName}:",
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            TranslatableEnglishText(
+                                                text = msg.text,
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = msgDraft,
+                                onValueChange = { msgDraft = it.take(180) },
+                                placeholder = { Text("Message Hotspot Squad...") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = {
+                                    if (msgDraft.isNotBlank()) {
+                                        onSendHotspotMessage(msgDraft.trim(), false)
+                                        msgDraft = ""
+                                    }
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send Hotspot message")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

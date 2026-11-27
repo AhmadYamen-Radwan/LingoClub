@@ -41,12 +41,14 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.TheaterComedy
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -119,9 +121,11 @@ fun HomeScreen(
     isTutor: Boolean,
     studentsCount: Int = 0,
     fallbackName: String,
+    isOfflineMode: Boolean = false,
     selectedLevel: CefrLevel?,
     onSelectLevel: (CefrLevel?) -> Unit,
     onNavigateQuiz: () -> Unit,
+    onNavigateLeaderboard: () -> Unit = {},
     onNavigateArcade: () -> Unit = {},
     onNavigateSpinWheel: () -> Unit = onNavigateArcade,
     onNavigateCurriculum: () -> Unit,
@@ -153,6 +157,7 @@ fun HomeScreen(
         isTutor,
         studentsCount,
         onNavigateQuiz,
+        onNavigateLeaderboard,
         onNavigateArcade,
         onNavigateCurriculum,
         onNavigateAudiobooks,
@@ -179,13 +184,24 @@ fun HomeScreen(
             DashboardGameMode(
                 id = "game_arcade",
                 title = "Game Arcade",
-                subtitle = "Word Dash, Detective, 3D Flip & Wheel",
-                badge = "4 Games",
+                subtitle = "Crime Mystery, Vault Cracker, Evidence & Dash",
+                badge = "${ArcadeMode.entries.size} Games",
                 icon = Icons.Filled.SportsEsports,
                 containerColor = CoralSoft,
                 accentColor = CoralOnSoft,
                 testTag = "home_tile_arcade",
                 onClick = onNavigateArcade
+            ),
+            DashboardGameMode(
+                id = "global_leaderboard",
+                title = "Leaderboard",
+                subtitle = "Global quiz champions & streaks",
+                badge = "Top 50",
+                icon = Icons.Filled.Leaderboard,
+                containerColor = AmberSoft,
+                accentColor = AmberOnSoft,
+                testTag = "home_tile_leaderboard",
+                onClick = onNavigateLeaderboard
             ),
             DashboardGameMode(
                 id = "curriculum",
@@ -431,6 +447,56 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+
+                    if (isOfflineMode) {
+                        Card(
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = MintSoft),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onNavigateChat)
+                                .testTag("home_offline_hotspot_banner")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.WifiOff,
+                                        contentDescription = null,
+                                        tint = MintOnSoft
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Offline & Wi-Fi Hotspot Mode",
+                                            color = MintOnSoft,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Form a Hotspot Squad or host offline quizzes in Teams!",
+                                            color = MintOnSoft.copy(alpha = 0.85f),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "Hotspot ->",
+                                    color = MintOnSoft,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
 

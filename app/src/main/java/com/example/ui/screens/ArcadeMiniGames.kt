@@ -31,7 +31,9 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -72,6 +74,7 @@ import com.example.data.content.Week2Words
 import com.example.data.model.CefrLevel
 import com.example.ui.components.CelebrationConfettiBurst
 import com.example.ui.components.CefrBadge
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.Trophy3DFigure
 import com.example.ui.theme.AmberAccent
 import com.example.ui.theme.AmberOnSoft
@@ -1031,6 +1034,574 @@ internal fun MemoryFlip3DGame(
                 triggerKey = "mem_win_$roundSeed",
                 modifier = Modifier.matchParentSize()
             )
+        }
+    }
+}
+
+private data class VaultCipherWord(
+    val word: String,
+    val arabic: String,
+    val clue: String,
+    val level: CefrLevel
+)
+
+private val CURATED_HEIST_CIPHERS = listOf(
+    VaultCipherWord("ALIBI", "ذريعة / حجة غياب", "Proof that a suspect was somewhere else.", CefrLevel.B1),
+    VaultCipherWord("THIEF", "لص", "Someone who secretly steals treasure or art.", CefrLevel.A2),
+    VaultCipherWord("VAULT", "خزينة", "Heavy steel room protecting gold and jewels.", CefrLevel.B1),
+    VaultCipherWord("CLUE", "دليل", "A small hint that helps solve a mystery.", CefrLevel.A2),
+    VaultCipherWord("FORGE", "يزور", "To illegally copy a painting or signature.", CefrLevel.B2),
+    VaultCipherWord("GUARD", "حارس", "Officer watching the museum halls at night.", CefrLevel.A1),
+    VaultCipherWord("HEIST", "سرقة كبرى", "A carefully planned robbery of a bank or gallery.", CefrLevel.B2),
+    VaultCipherWord("TRACE", "أثر", "Tiny evidence left behind at a crime scene.", CefrLevel.B1),
+    VaultCipherWord("LOCK", "قفل", "Security device opened with a key or cipher.", CefrLevel.A1),
+    VaultCipherWord("CASE", "قضية", "An investigation opened by a detective.", CefrLevel.A2)
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun VaultCodebreakerGame(
+    words: List<ArcadeWordItem>,
+    selectedLevel: CefrLevel?,
+    onShareScore: (String) -> Unit,
+    onFinished: (xp: Long, accuracyPct: Long, count: Int, maxCombo: Int) -> Unit
+) {
+    val tts = rememberTtsSpeaker()
+    val haptic = LocalHapticFeedback.current
+
+    val cipherPool = remember(words, selectedLevel) {
+        val dynamicWords = words.mapNotNull { item ->
+            val clean = item.english.trim().uppercase()
+            if (clean.length in 4..5 && clean.all { it in 'A'..'Z' }) {
+                VaultCipherWord(clean, item.arabic, item.hint, item.cefrLevel)
+            } else null
+        }
+        (CURATED_HEIST_CIPHERS + dynamicWords)
+            .distinctBy { it.word }
+            .filter { selectedLevel == null || it.level == selectedLevel }
+            .ifEmpty { CURATED_HEIST_CIPHERS }
+    }
+
+    var roundSeed by remember(selectedLevel) { mutableIntStateOf(kotlin.random.Random.nextInt(10000)) }
+    val target = remember(cipherPool, roundSeed) {
+        cipherPool[kotlin.random.Random(roundSeed).nextInt(cipherPool.size)]
+    }
+    val wordLen = target.word.length
+    val maxRows = 5
+
+    val submittedGuesses = remember(target.word, roundSeed) { mutableStateListOf<String>() }
+    var currentInput by remember(target.word, roundSeed) { mutableStateOf("") }
+    var showArabicClue by remember(target.word, roundSeed) { mutableStateOf(false) }
+    var recorded by remember(target.word, roundSeed) { mutableStateOf(false) }
+
+    val won = submittedGuesses.any { it == target.word }
+    val lost = !won && submittedGuesses.size >= maxRows
+    val isDone = won || lost
+
+    LaunchedEffect(isDone) {
+        if (isDone && !recorded) {
+            recorded = true
+            val attemptsUsed = submittedGuesses.size.coerceAtLeast(1)
+            val acc = if (won) ((6 - attemptsUsed) * 20L).coerceIn(40L, 100L) else 25L
+            val xp = if (won) (30L + (maxRows - attemptsUsed) * 10L) else 10L
+            if (won) tts.speak(target.word)
+            onFinished(xp, acc, 1, if (won) (maxRows - attemptsUsed + 1) else 0)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CefrBadge(level = target.level)
+                        Text(
+                            text = "Vault Cipher (${wordLen} letters)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${submittedGuesses.size}/$maxRows",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    TranslatableEnglishText(
+                        text = "Vault Hint: ${target.clue}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    AnimatedVisibility(visible = showArabicClue || isDone) {
+                        Surface(color = AmberSoft, shape = RoundedCornerShape(12.dp)) {
+                            Text(
+                                text = "Arabic: ${target.arabic}",
+                                color = AmberOnSoft,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    // Cipher matrix rows
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (rowIdx in 0 until maxRows) {
+                            val rowGuess = when {
+                                rowIdx < submittedGuesses.size -> submittedGuesses[rowIdx]
+                                rowIdx == submittedGuesses.size && !isDone -> currentInput
+                                else -> ""
+                            }
+                            val isSubmitted = rowIdx < submittedGuesses.size
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for (colIdx in 0 until wordLen) {
+                                    val ch = rowGuess.getOrNull(colIdx)?.toString() ?: ""
+                                    val targetChar = target.word[colIdx]
+                                    val chChar = rowGuess.getOrNull(colIdx)
+                                    val bg = when {
+                                        !isSubmitted && ch.isNotEmpty() -> IndigoSoft
+                                        !isSubmitted -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                        chChar == targetChar -> MintSoft
+                                        chChar != null && chChar in target.word -> AmberSoft
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                    val fg = when {
+                                        !isSubmitted && ch.isNotEmpty() -> IndigoOnSoft
+                                        !isSubmitted -> MaterialTheme.colorScheme.onSurface
+                                        chChar == targetChar -> MintOnSoft
+                                        chChar != null && chChar in target.word -> AmberOnSoft
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = bg,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isSubmitted && chChar == targetChar) MintTertiary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                        ),
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = ch,
+                                                color = fg,
+                                                fontFamily = JetBrainsMonoFontFamily,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!isDone) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { showArabicClue = true },
+                                enabled = !showArabicClue,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Filled.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Arabic Clue", maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    if (currentInput.isNotEmpty()) currentInput = currentInput.dropLast(1)
+                                },
+                                enabled = currentInput.isNotEmpty(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("⌫")
+                            }
+                            Button(
+                                onClick = {
+                                    if (currentInput.length == wordLen) {
+                                        submittedGuesses.add(currentInput)
+                                        haptic.performHapticFeedback(
+                                            if (currentInput == target.word) HapticFeedbackType.LongPress else HapticFeedbackType.TextHandleMove
+                                        )
+                                        currentInput = ""
+                                    }
+                                },
+                                enabled = currentInput.length == wordLen,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Crack")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isDone) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = if (won) MintSoft else CoralSoft),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val fg = if (won) MintOnSoft else CoralOnSoft
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (won) Trophy3DFigure(size = 74.dp)
+                        Text(
+                            text = if (won) "Vault Cracked! Cipher: ${target.word}" else "Alarm Triggered! Code was ${target.word}",
+                            color = fg,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    onShareScore("🔐 Cracked vault code '${target.word}' (${target.arabic}) in ${submittedGuesses.size} tries!")
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Share to Chat")
+                            }
+                            Button(
+                                onClick = { roundSeed = kotlin.random.Random.nextInt(10000) },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("New Vault Code")
+                            }
+                        }
+                    }
+                }
+            } else {
+                val alphabet = ('A'..'Z').toList()
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    alphabet.forEach { ch ->
+                        val exactHit = submittedGuesses.any { g ->
+                            g.indices.any { i -> g[i] == ch && target.word[i] == ch }
+                        }
+                        val inWord = !exactHit && submittedGuesses.any { ch in it } && ch in target.word
+                        val missed = submittedGuesses.any { ch in it } && ch !in target.word
+                        val bg = when {
+                            exactHit -> MintSoft
+                            inWord -> AmberSoft
+                            missed -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            else -> MaterialTheme.colorScheme.surface
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = bg,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .size(width = 38.dp, height = 44.dp)
+                                .clickable(enabled = currentInput.length < wordLen) {
+                                    currentInput += ch
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = ch.toString(),
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (missed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (won) {
+            CelebrationConfettiBurst(
+                triggerKey = "vault_win_${target.word}_$roundSeed",
+                modifier = Modifier.matchParentSize()
+            )
+        }
+    }
+}
+
+private data class OddClueRound(
+    val scenarioPrompt: String,
+    val options: List<String>,
+    val oddIndex: Int,
+    val explanation: String,
+    val level: CefrLevel
+)
+
+private val CURATED_ODD_CLUE_ROUNDS = listOf(
+    OddClueRound(
+        scenarioPrompt = "Three items belong to a jewel heist; tap the one that contradicts the suspect's alibi!",
+        options = listOf("Muddy hiking boots", "Library receipt", "Museum glass cutter", "Blue diamond dust"),
+        oddIndex = 1,
+        explanation = "The library receipt is the only innocent daytime paper — the other three trace to the gallery break-in!",
+        level = CefrLevel.B1
+    ),
+    OddClueRound(
+        scenarioPrompt = "Three words describe legal detective work; pick the thief action that does not belong.",
+        options = listOf("Investigate", "Interrogate", "Counterfeit", "Verify"),
+        oddIndex = 2,
+        explanation = "'Counterfeit' (يزور / يقلد) means creating fake currency or art — detectives investigate and verify.",
+        level = CefrLevel.B2
+    ),
+    OddClueRound(
+        scenarioPrompt = "Spot the word that is NOT a crime-scene clue!",
+        options = listOf("Fingerprint", "Footprint", "Breakfast menu", "Witness statement"),
+        oddIndex = 2,
+        explanation = "A breakfast menu is unrelated here, while fingerprints, footprints, and witness statements solve cases.",
+        level = CefrLevel.A2
+    ),
+    OddClueRound(
+        scenarioPrompt = "Identify which suspect statement breaks the midnight timeline.",
+        options = listOf("Arrived at 11:45 PM", "Heard glass at 12:02 AM", "Saw fog at noon", "Locked gate at 11:55 PM"),
+        oddIndex = 2,
+        explanation = "'At noon' is 12 hours away from midnight — it does not match the midnight burglary window.",
+        level = CefrLevel.B1
+    ),
+    OddClueRound(
+        scenarioPrompt = "Three tools silence or bypass alarms; choose the ordinary museum piece.",
+        options = listOf("Thermal lance", "Grappling hook", "Porcelain vase", "Lockpick kit"),
+        oddIndex = 2,
+        explanation = "The porcelain vase is the stolen artifact, whereas the others are burglary tools.",
+        level = CefrLevel.B2
+    ),
+    OddClueRound(
+        scenarioPrompt = "Find the English word that does NOT mean honesty or truth.",
+        options = listOf("Evidence", "Proof", "Deception", "Fact"),
+        oddIndex = 2,
+        explanation = "'Deception' (خداع) means misleading others with lies.",
+        level = CefrLevel.B1
+    )
+)
+
+@Composable
+internal fun MysteryOddOneSpeedDuelGame(
+    words: List<ArcadeWordItem>,
+    selectedLevel: CefrLevel?,
+    onShareScore: (String) -> Unit,
+    onFinished: (xp: Long, accuracyPct: Long, count: Int, maxCombo: Int) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    var roundSeed by remember(selectedLevel) { mutableIntStateOf(kotlin.random.Random.nextInt(10000)) }
+    var timeLeft by remember(roundSeed) { mutableIntStateOf(40) }
+    var score by remember(roundSeed) { mutableIntStateOf(0) }
+    var streak by remember(roundSeed) { mutableIntStateOf(0) }
+    var maxCombo by remember(roundSeed) { mutableIntStateOf(0) }
+    var correctCount by remember(roundSeed) { mutableIntStateOf(0) }
+    var attempts by remember(roundSeed) { mutableIntStateOf(0) }
+    var stepIdx by remember(roundSeed) { mutableIntStateOf(0) }
+    var selectedIdx by remember(roundSeed, stepIdx) { mutableStateOf<Int?>(null) }
+    var finished by remember(roundSeed) { mutableStateOf(false) }
+    var recorded by remember(roundSeed) { mutableStateOf(false) }
+
+    val dynamicDeck = remember(words, selectedLevel, roundSeed) {
+        val rng = kotlin.random.Random(roundSeed)
+        val filteredCurated = CURATED_ODD_CLUE_ROUNDS
+            .filter { selectedLevel == null || it.level == selectedLevel }
+            .ifEmpty { CURATED_ODD_CLUE_ROUNDS }
+            .shuffled(rng)
+        val generatedFromWords = words.shuffled(rng).chunked(4).take(6).mapNotNull { chunk ->
+            if (chunk.size < 4) null
+            else {
+                val target = chunk[0]
+                val distractors = chunk.drop(1).map { "${it.english} (${it.arabic})" }
+                val oddItem = "${target.english} ≠ Mystery Fit"
+                val combined = (distractors + oddItem).shuffled(rng)
+                OddClueRound(
+                    scenarioPrompt = "Adaptive Duel: Pick the target item matching Arabic '${target.arabic}'!",
+                    options = combined.map { it.substringBefore(" (") },
+                    oddIndex = combined.indexOf(oddItem),
+                    explanation = "'${target.english}' means '${target.arabic}' — ${target.hint}",
+                    level = target.cefrLevel
+                )
+            }
+        }
+        (filteredCurated + generatedFromWords).shuffled(rng)
+    }
+
+    val currentRound = dynamicDeck[stepIdx % dynamicDeck.size]
+
+    LaunchedEffect(roundSeed, finished) {
+        if (!finished) {
+            while (timeLeft > 0) {
+                delay(1000)
+                timeLeft--
+            }
+            finished = true
+        }
+    }
+
+    LaunchedEffect(finished) {
+        if (finished && !recorded) {
+            recorded = true
+            val acc = if (attempts > 0) ((correctCount * 100f) / attempts).toLong() else 0L
+            val xp = (score / 12L).coerceIn(15L, 180L)
+            onFinished(xp, acc, attempts.coerceAtLeast(1), maxCombo)
+        }
+    }
+
+    if (finished) {
+        val acc = if (attempts > 0) (correctCount * 100) / attempts else 0
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Trophy3DFigure(size = 86.dp)
+                        Text("Mystery Speed Duel Complete!", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Text("$score pts • $acc% accuracy • ${maxCombo}x streak", color = Color.White.copy(alpha = 0.92f))
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = { onShareScore("⚡ Scored $score pts ($acc%, ${maxCombo}x streak) in Mystery Speed Duel!") },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Share Score")
+                    }
+                    Button(
+                        onClick = { roundSeed = kotlin.random.Random.nextInt(10000) },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("New Adaptive Run")
+                    }
+                }
+            }
+            CelebrationConfettiBurst(triggerKey = "duel_win_$roundSeed", modifier = Modifier.matchParentSize())
+        }
+        return
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CefrBadge(level = currentRound.level)
+            Text("Score: $score • ${streak}x", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Surface(color = if (timeLeft <= 10) CoralSoft else AmberSoft, shape = RoundedCornerShape(99.dp)) {
+                Text(
+                    text = "${timeLeft}s",
+                    color = if (timeLeft <= 10) CoralOnSoft else AmberOnSoft,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                )
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TranslatableEnglishText(
+                    text = currentRound.scenarioPrompt,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                currentRound.options.forEachIndexed { idx, opt ->
+                    val picked = selectedIdx == idx
+                    val isRight = idx == currentRound.oddIndex
+                    val bg = when {
+                        selectedIdx == null -> IndigoSoft
+                        isRight -> MintSoft
+                        picked -> CoralSoft
+                        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    }
+                    val fg = when {
+                        selectedIdx == null -> IndigoOnSoft
+                        isRight -> MintOnSoft
+                        picked -> CoralOnSoft
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Surface(
+                        color = bg,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = selectedIdx == null) {
+                                selectedIdx = idx
+                                attempts++
+                                if (isRight) {
+                                    streak++
+                                    if (streak > maxCombo) maxCombo = streak
+                                    correctCount++
+                                    score += 120 + (streak.coerceAtMost(5) * 40)
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                } else {
+                                    streak = 0
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                            }
+                    ) {
+                        Text(
+                            text = opt,
+                            color = fg,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                        )
+                    }
+                }
+                if (selectedIdx != null) {
+                    TranslatableEnglishText(
+                        text = currentRound.explanation,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Button(
+                        onClick = { stepIdx++ },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Next Adaptive Clue")
+                    }
+                }
+            }
         }
     }
 }

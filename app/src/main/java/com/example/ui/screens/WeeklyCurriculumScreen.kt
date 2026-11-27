@@ -64,6 +64,7 @@ import com.example.data.model.WeeklyProgress
 import com.example.data.model.WeeklyVocabWord
 import com.example.ui.UiState
 import com.example.ui.components.CefrBadge
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.theme.AmberOnSoft
 import com.example.ui.theme.AmberSoft
 import com.example.ui.theme.IndigoOnSoft
@@ -320,10 +321,11 @@ fun WeeklyCurriculumScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = AmberOnSoft
                                 )
-                                Text(
+                                TranslatableEnglishText(
                                     text = sessionPlan.storyOpening,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = AmberOnSoft
+                                    color = AmberOnSoft,
+                                    underlineColor = AmberOnSoft
                                 )
                                 Text(
                                     text = sessionPlan.teachingTip,
@@ -448,7 +450,7 @@ fun WeeklyCurriculumScreen(
                                                         )
                                                     }
                                                     if (vocab.storyLine.isNotBlank()) {
-                                                        Text(
+                                                        TranslatableEnglishText(
                                                             text = "\"${vocab.storyLine}\"",
                                                             style = MaterialTheme.typography.bodySmall
                                                         )
@@ -593,11 +595,12 @@ private fun WeeklyWordCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = mutedColor
             )
-            Text(
+            TranslatableEnglishText(
                 text = "\"${word.storyLine}\"",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
-                color = textColor
+                color = textColor,
+                underlineColor = if (isMastered) MintOnSoft else MaterialTheme.colorScheme.primary
             )
         }
     }

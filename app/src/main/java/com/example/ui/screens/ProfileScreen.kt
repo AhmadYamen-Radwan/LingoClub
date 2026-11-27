@@ -106,6 +106,7 @@ fun ProfileScreen(
     profileState: UiState<UserProfile?>,
     sessionHistoryState: UiState<List<SessionRecord>>,
     fallbackName: String,
+    isOfflineMode: Boolean = false,
     onSelectLearningLevel: (CefrLevel) -> Unit,
     onSignOut: () -> Unit,
     onBack: (() -> Unit)? = null,
@@ -162,7 +163,8 @@ fun ProfileScreen(
                                 style = MaterialTheme.typography.displaySmall
                             )
                             Text(
-                                text = "Your CEFR level & Firestore performance history",
+                                text = if (isOfflineMode) "Offline & Hotspot Mode • Progress saved locally"
+                                else "Your CEFR level & Firestore performance history",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -176,7 +178,7 @@ fun ProfileScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Logout,
-                            contentDescription = "Sign out",
+                            contentDescription = if (isOfflineMode) "Sign In Online" else "Sign out",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

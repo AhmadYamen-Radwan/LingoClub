@@ -64,6 +64,7 @@ import com.example.data.model.CefrLevel
 import com.example.ui.components.AnimatedEqualizerBars
 import com.example.ui.components.CefrBadge
 import com.example.ui.components.CefrFilterRow
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.theme.AmberOnSoft
 import com.example.ui.theme.AmberSoft
 import com.example.ui.theme.IndigoOnSoft
@@ -479,11 +480,12 @@ private fun AudiobookPlayerView(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Top
                         ) {
-                            Text(
+                            TranslatableEnglishText(
                                 text = para.english,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isCurrent) AmberOnSoft else MaterialTheme.colorScheme.onSurface,
+                                underlineColor = if (isCurrent) AmberOnSoft else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(
@@ -557,10 +559,11 @@ private fun AudiobookPlayerView(
                         fontWeight = FontWeight.Bold,
                         color = MintOnSoft
                     )
-                    Text(
+                    TranslatableEnglishText(
                         text = chapter.reflectionPrompt,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MintOnSoft
+                        color = MintOnSoft,
+                        underlineColor = MintOnSoft
                     )
                 }
             }

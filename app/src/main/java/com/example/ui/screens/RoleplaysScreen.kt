@@ -83,6 +83,7 @@ import com.example.data.model.HighlightedPhrase
 import com.example.data.model.RoleplayScenario
 import com.example.data.model.RoleplaySource
 import com.example.ui.AiGenState
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.UiState
 import com.example.ui.components.AsyncDrawableImage
 import com.example.ui.components.CefrBadge
@@ -573,11 +574,12 @@ private fun RoleplayStageView(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
+                    TranslatableEnglishText(
                         text = "Scene Goal: ${scenario.goal}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = IndigoOnSoft
+                        color = IndigoOnSoft,
+                        underlineColor = IndigoOnSoft
                     )
                     Text(
                         text = "Tip: Tap any phrase chip below a line to hear it and see how to explain it!",
@@ -648,9 +650,10 @@ private fun RoleplayStageView(
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
+                        TranslatableEnglishText(
                             text = currentTwist,
                             color = AmberOnSoft,
+                            underlineColor = AmberOnSoft,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(16.dp)
@@ -773,7 +776,7 @@ private fun RoleplayStageView(
                             ScaffoldMode.HINTS -> "Cue: ${line.keyHint}"
                             ScaffoldMode.IMPROV -> "Your turn as $roleLabel — improvise freely!"
                         }
-                        Text(
+                        TranslatableEnglishText(
                             text = displayBody,
                             style = MaterialTheme.typography.bodyLarge
                         )

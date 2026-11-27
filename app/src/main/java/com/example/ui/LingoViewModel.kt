@@ -39,6 +39,7 @@ import com.example.data.model.TeamChannelKind
 import com.example.data.model.TutorStudentProgress
 import com.example.data.model.UserProfile
 import com.example.data.model.WeeklyProgress
+import com.example.data.offline.OfflineLocalStore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +53,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -88,222 +90,329 @@ class LingoViewModel(
     private val repository: LingoRepository,
     val currentUserId: String,
     val currentUserName: String,
-    private val aiGenerator: LingoAiGenerator = LingoAiGenerator()
+    private val aiGenerator: LingoAiGenerator = LingoAiGenerator(),
+    val isOfflineMode: Boolean = false,
+    private val offlineStore: OfflineLocalStore? = null
 ) : ViewModel() {
 
-    val userProfileState: StateFlow<UiState<UserProfile?>> = repository.observeUserProfile(currentUserId)
-        .map<UserProfile?, UiState<UserProfile?>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing profile", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load profile"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
-
-    val sessionHistoryState: StateFlow<UiState<List<SessionRecord>>> = repository.observeSessionHistory(currentUserId)
-        .map<List<SessionRecord>, UiState<List<SessionRecord>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing session history", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load history"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
-
-    val weeklyProgressState: StateFlow<Map<Int, WeeklyProgress>> = repository.observeWeeklyProgress(currentUserId)
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing weekly progress", firestoreError)
-            emit(emptyMap())
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = emptyMap()
-        )
-
-    val customRoleplaysState: StateFlow<UiState<List<CustomRoleplay>>> = repository.observeCustomRoleplays(currentUserId)
-        .map<List<CustomRoleplay>, UiState<List<CustomRoleplay>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing custom roleplays", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load custom roleplays"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
-
-    val customQuizzesState: StateFlow<UiState<List<CustomQuiz>>> = repository.observeCustomQuizzes(currentUserId)
-        .map<List<CustomQuiz>, UiState<List<CustomQuiz>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing custom quizzes", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load quizzes"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
-
-    val customDecksState: StateFlow<UiState<List<CustomDeck>>> = repository.observeCustomDecks(currentUserId)
-        .map<List<CustomDeck>, UiState<List<CustomDeck>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing custom decks", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load decks"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
-
-    val cardMasteryState: StateFlow<Map<String, CardMastery>> = repository.observeCardMastery(currentUserId)
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing mastery", firestoreError)
-            emit(emptyMap())
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = emptyMap()
-        )
-
-    val isBootstrappedTutor: Boolean = repository.isBootstrappedTutor()
-
-    val studentsProgressState: StateFlow<UiState<List<TutorStudentProgress>>> = combine(
-        repository.observeLinkedStudents(currentUserId).catch { emit(emptyList()) },
-        repository.observeBootstrappedStudents().catch { emit(emptyList()) },
-        repository.observeDirectAssignedStudents(currentUserId).catch { emit(emptyList()) }
-    ) { linked, bootstrapped, direct ->
-        val merged = linked.associateBy { it.studentUid }.toMutableMap()
-        (bootstrapped + direct).forEach { user ->
-            val existing = merged[user.userId]
-            if (existing == null) {
-                merged[user.userId] = TutorStudentProgress(
-                    id = user.userId,
-                    studentUid = user.userId,
-                    tutorUid = user.tutorUid.ifBlank { currentUserId },
-                    studentName = user.displayName,
-                    learningLevel = user.learningLevel,
-                    xp = user.xp,
-                    streak = user.streak,
-                    sessionsCompleted = user.sessionsCompleted,
-                    weeklyWordsMastered = user.weeklyWordsMastered,
-                    quizzesPlayed = user.quizzesPlayed,
-                    quizzesHosted = user.quizzesHosted,
-                    bestLiveQuizScore = user.bestLiveQuizScore,
-                    cardsMastered = user.cardsMastered,
-                    decksCreated = 0L,
-                    audiobooksFinished = user.audiobooksFinished,
-                    teamName = user.teamName,
-                    earnedBadges = user.earnedBadges,
-                    recentActivities = emptyList(),
-                    createdAt = user.createdAt,
-                    updatedAt = user.updatedAt
-                )
-            } else {
-                // Keep richer snapshot info while refreshing core counters from live user doc
-                merged[user.userId] = existing.copy(
-                    studentName = user.displayName.ifBlank { existing.studentName },
-                    learningLevel = user.learningLevel,
-                    xp = maxOf(existing.xp, user.xp),
-                    streak = user.streak,
-                    sessionsCompleted = maxOf(existing.sessionsCompleted, user.sessionsCompleted),
-                    weeklyWordsMastered = maxOf(existing.weeklyWordsMastered, user.weeklyWordsMastered),
-                    quizzesPlayed = maxOf(existing.quizzesPlayed, user.quizzesPlayed),
-                    quizzesHosted = maxOf(existing.quizzesHosted, user.quizzesHosted),
-                    bestLiveQuizScore = maxOf(existing.bestLiveQuizScore, user.bestLiveQuizScore),
-                    cardsMastered = maxOf(existing.cardsMastered, user.cardsMastered),
-                    audiobooksFinished = maxOf(existing.audiobooksFinished, user.audiobooksFinished),
-                    teamName = user.teamName.ifBlank { existing.teamName },
-                    earnedBadges = (existing.earnedBadges + user.earnedBadges).distinct()
-                )
+    val userProfileState: StateFlow<UiState<UserProfile?>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.profileFlow
+            .map<UserProfile?, UiState<UserProfile?>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(offlineStore.profileFlow.value)
+            )
+    } else {
+        repository.observeUserProfile(currentUserId)
+            .map<UserProfile?, UiState<UserProfile?>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing profile", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load profile"))
             }
-        }
-        UiState.Success(merged.values.sortedByDescending { it.xp }) as UiState<List<TutorStudentProgress>>
-    }.catch { error ->
-        val firestoreError = unwrapFirestoreErrorOrThrow(error)
-        emit(UiState.Error(firestoreError.message ?: "Failed to load student progress"))
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-        initialValue = UiState.Loading
-    )
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
+
+    val sessionHistoryState: StateFlow<UiState<List<SessionRecord>>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.sessionHistoryFlow
+            .map<List<SessionRecord>, UiState<List<SessionRecord>>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(offlineStore.sessionHistoryFlow.value)
+            )
+    } else {
+        repository.observeSessionHistory(currentUserId)
+            .map<List<SessionRecord>, UiState<List<SessionRecord>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing session history", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load history"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
+
+    val weeklyProgressState: StateFlow<Map<Int, WeeklyProgress>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.weeklyProgressFlow
+    } else {
+        repository.observeWeeklyProgress(currentUserId)
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing weekly progress", firestoreError)
+                emit(emptyMap())
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = emptyMap()
+            )
+    }
+
+    val customRoleplaysState: StateFlow<UiState<List<CustomRoleplay>>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.customRoleplaysFlow
+            .map<List<CustomRoleplay>, UiState<List<CustomRoleplay>>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(emptyList())
+            )
+    } else {
+        repository.observeCustomRoleplays(currentUserId)
+            .map<List<CustomRoleplay>, UiState<List<CustomRoleplay>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing custom roleplays", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load custom roleplays"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
+
+    val customQuizzesState: StateFlow<UiState<List<CustomQuiz>>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.customQuizzesFlow
+            .map<List<CustomQuiz>, UiState<List<CustomQuiz>>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(offlineStore.customQuizzesFlow.value)
+            )
+    } else {
+        repository.observeCustomQuizzes(currentUserId)
+            .map<List<CustomQuiz>, UiState<List<CustomQuiz>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing custom quizzes", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load quizzes"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
+
+    val customDecksState: StateFlow<UiState<List<CustomDeck>>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.customDecksFlow
+            .map<List<CustomDeck>, UiState<List<CustomDeck>>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(emptyList())
+            )
+    } else {
+        repository.observeCustomDecks(currentUserId)
+            .map<List<CustomDeck>, UiState<List<CustomDeck>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing custom decks", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load decks"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
+
+    val cardMasteryState: StateFlow<Map<String, CardMastery>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.cardMasteryFlow
+    } else {
+        repository.observeCardMastery(currentUserId)
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing mastery", firestoreError)
+                emit(emptyMap())
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = emptyMap()
+            )
+    }
+
+    val isBootstrappedTutor: Boolean = !isOfflineMode && repository.isBootstrappedTutor()
+
+    val studentsProgressState: StateFlow<UiState<List<TutorStudentProgress>>> = if (isOfflineMode) {
+        flowOf(UiState.Success(emptyList<TutorStudentProgress>()) as UiState<List<TutorStudentProgress>>).stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = UiState.Success(emptyList())
+        )
+    } else {
+        combine(
+            repository.observeLinkedStudents(currentUserId).catch { emit(emptyList()) },
+            repository.observeBootstrappedStudents().catch { emit(emptyList()) },
+            repository.observeDirectAssignedStudents(currentUserId).catch { emit(emptyList()) }
+        ) { linked, bootstrapped, direct ->
+            val merged = linked.associateBy { it.studentUid }.toMutableMap()
+            (bootstrapped + direct).forEach { user ->
+                val existing = merged[user.userId]
+                if (existing == null) {
+                    merged[user.userId] = TutorStudentProgress(
+                        id = user.userId,
+                        studentUid = user.userId,
+                        tutorUid = user.tutorUid.ifBlank { currentUserId },
+                        studentName = user.displayName,
+                        learningLevel = user.learningLevel,
+                        xp = user.xp,
+                        streak = user.streak,
+                        sessionsCompleted = user.sessionsCompleted,
+                        weeklyWordsMastered = user.weeklyWordsMastered,
+                        quizzesPlayed = user.quizzesPlayed,
+                        quizzesHosted = user.quizzesHosted,
+                        bestLiveQuizScore = user.bestLiveQuizScore,
+                        cardsMastered = user.cardsMastered,
+                        decksCreated = 0L,
+                        audiobooksFinished = user.audiobooksFinished,
+                        teamName = user.teamName,
+                        earnedBadges = user.earnedBadges,
+                        recentActivities = emptyList(),
+                        createdAt = user.createdAt,
+                        updatedAt = user.updatedAt
+                    )
+                } else {
+                    merged[user.userId] = existing.copy(
+                        studentName = user.displayName.ifBlank { existing.studentName },
+                        learningLevel = user.learningLevel,
+                        xp = maxOf(existing.xp, user.xp),
+                        streak = user.streak,
+                        sessionsCompleted = maxOf(existing.sessionsCompleted, user.sessionsCompleted),
+                        weeklyWordsMastered = maxOf(existing.weeklyWordsMastered, user.weeklyWordsMastered),
+                        quizzesPlayed = maxOf(existing.quizzesPlayed, user.quizzesPlayed),
+                        quizzesHosted = maxOf(existing.quizzesHosted, user.quizzesHosted),
+                        bestLiveQuizScore = maxOf(existing.bestLiveQuizScore, user.bestLiveQuizScore),
+                        cardsMastered = maxOf(existing.cardsMastered, user.cardsMastered),
+                        audiobooksFinished = maxOf(existing.audiobooksFinished, user.audiobooksFinished),
+                        teamName = user.teamName.ifBlank { existing.teamName },
+                        earnedBadges = (existing.earnedBadges + user.earnedBadges).distinct()
+                    )
+                }
+            }
+            UiState.Success(merged.values.sortedByDescending { it.xp }) as UiState<List<TutorStudentProgress>>
+        }.catch { error ->
+            val firestoreError = unwrapFirestoreErrorOrThrow(error)
+            emit(UiState.Error(firestoreError.message ?: "Failed to load student progress"))
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = UiState.Loading
+        )
+    }
 
     private val _selectedStudentDetailState = MutableStateFlow<UiState<StudentDetailBundle?>>(UiState.Success(null))
     val selectedStudentDetailState: StateFlow<UiState<StudentDetailBundle?>> = _selectedStudentDetailState.asStateFlow()
 
-    val teamsState: StateFlow<UiState<List<TeamChannel>>> = repository.observeTeams()
-        .map<List<TeamChannel>, UiState<List<TeamChannel>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing teams", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load teams"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
+    val teamsState: StateFlow<UiState<List<TeamChannel>>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.teamsFlow
+            .map<List<TeamChannel>, UiState<List<TeamChannel>>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(offlineStore.teamsFlow.value)
+            )
+    } else {
+        repository.observeTeams()
+            .map<List<TeamChannel>, UiState<List<TeamChannel>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing teams", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load teams"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
 
-    private val _selectedTeamId = MutableStateFlow(LingoRepository.DEFAULT_TEACHER_HUB_ID)
+    private val _selectedTeamId = MutableStateFlow(
+        if (isOfflineMode) OfflineLocalStore.OFFLINE_DEFAULT_TEAM_ID else LingoRepository.DEFAULT_TEACHER_HUB_ID
+    )
     val selectedTeamId: StateFlow<String> = _selectedTeamId.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val chatMessagesState: StateFlow<UiState<List<ChatMessage>>> = _selectedTeamId
-        .filterNotNull()
-        .flatMapLatest { teamId ->
-            repository.observeTeamMessages(teamId)
-                .map<List<ChatMessage>, UiState<List<ChatMessage>>> { UiState.Success(it) }
-                .catch { error ->
-                    val firestoreError = unwrapFirestoreErrorOrThrow(error)
-                    Log.w(TAG, "Error observing chat messages for $teamId", firestoreError)
-                    emit(UiState.Error(firestoreError.message ?: "Failed to load team messages"))
-                }
-        }
-        .stateIn(
+    val chatMessagesState: StateFlow<UiState<List<ChatMessage>>> = if (isOfflineMode && offlineStore != null) {
+        combine(_selectedTeamId, offlineStore.messagesMapFlow) { teamId, map ->
+            UiState.Success(map[teamId].orEmpty()) as UiState<List<ChatMessage>>
+        }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
+            initialValue = UiState.Success(emptyList())
         )
+    } else {
+        _selectedTeamId
+            .filterNotNull()
+            .flatMapLatest { teamId ->
+                repository.observeTeamMessages(teamId)
+                    .map<List<ChatMessage>, UiState<List<ChatMessage>>> { UiState.Success(it) }
+                    .catch { error ->
+                        val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                        Log.w(TAG, "Error observing chat messages for $teamId", firestoreError)
+                        emit(UiState.Error(firestoreError.message ?: "Failed to load team messages"))
+                    }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
 
-    val clubContentState: StateFlow<UiState<List<ClubContentItem>>> = repository.observeClubContent()
-        .map<List<ClubContentItem>, UiState<List<ClubContentItem>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing club content", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load club content"))
-        }
-        .stateIn(
+    val clubContentState: StateFlow<UiState<List<ClubContentItem>>> = if (isOfflineMode) {
+        flowOf(UiState.Success(emptyList<ClubContentItem>()) as UiState<List<ClubContentItem>>).stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
+            initialValue = UiState.Success(emptyList())
         )
+    } else {
+        repository.observeClubContent()
+            .map<List<ClubContentItem>, UiState<List<ClubContentItem>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing club content", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load club content"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
 
-    val globalScoresState: StateFlow<UiState<List<ScoreRecord>>> = repository.observeGlobalScores()
-        .map<List<ScoreRecord>, UiState<List<ScoreRecord>>> { UiState.Success(it) }
-        .catch { error ->
-            val firestoreError = unwrapFirestoreErrorOrThrow(error)
-            Log.w(TAG, "Error observing global scores", firestoreError)
-            emit(UiState.Error(firestoreError.message ?: "Failed to load global leaderboard"))
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            initialValue = UiState.Loading
-        )
+    val globalScoresState: StateFlow<UiState<List<ScoreRecord>>> = if (isOfflineMode && offlineStore != null) {
+        offlineStore.scoresFlow
+            .map<List<ScoreRecord>, UiState<List<ScoreRecord>>> { UiState.Success(it) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Success(offlineStore.scoresFlow.value)
+            )
+    } else {
+        repository.observeGlobalScores()
+            .map<List<ScoreRecord>, UiState<List<ScoreRecord>>> { UiState.Success(it) }
+            .catch { error ->
+                val firestoreError = unwrapFirestoreErrorOrThrow(error)
+                Log.w(TAG, "Error observing global scores", firestoreError)
+                emit(UiState.Error(firestoreError.message ?: "Failed to load global leaderboard"))
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = UiState.Loading
+            )
+    }
 
     private val _roomSession = MutableStateFlow<ActiveRoomSession?>(null)
     val roomSession: StateFlow<ActiveRoomSession?> = _roomSession.asStateFlow()
@@ -329,29 +438,31 @@ class LingoViewModel(
     private val recordedLivePodiumRooms = mutableSetOf<String>()
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.ensureUserProfile(currentUserName)
-        }
-        if (isBootstrappedTutor) {
+        if (!isOfflineMode) {
             viewModelScope.launch(Dispatchers.IO) {
-                repository.ensureDefaultTutorHubIfTutor(currentUserName)
+                repository.ensureUserProfile(currentUserName)
             }
-        }
-        // Automatically mirror linked student's progress to their tutor whenever profile/sessions/decks change
-        viewModelScope.launch(Dispatchers.IO) {
-            combine(
-                userProfileState.map { (it as? UiState.Success)?.data },
-                customDecksState.map { (it as? UiState.Success)?.data?.size ?: 0 },
-                sessionHistoryState.map { (it as? UiState.Success)?.data.orEmpty() }
-            ) { profile, decksCount, sessions ->
-                Triple(profile, decksCount, sessions)
-            }.collect { (profile, decksCount, sessions) ->
-                if (profile != null && profile.tutorUid.isNotBlank()) {
-                    repository.syncStudentProgressToTutor(
-                        profile = profile,
-                        decksCount = decksCount,
-                        recentSessions = sessions
-                    )
+            if (isBootstrappedTutor) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.ensureDefaultTutorHubIfTutor(currentUserName)
+                }
+            }
+            // Automatically mirror linked student's progress to their tutor whenever profile/sessions/decks change
+            viewModelScope.launch(Dispatchers.IO) {
+                combine(
+                    userProfileState.map { (it as? UiState.Success)?.data },
+                    customDecksState.map { (it as? UiState.Success)?.data?.size ?: 0 },
+                    sessionHistoryState.map { (it as? UiState.Success)?.data.orEmpty() }
+                ) { profile, decksCount, sessions ->
+                    Triple(profile, decksCount, sessions)
+                }.collect { (profile, decksCount, sessions) ->
+                    if (profile != null && profile.tutorUid.isNotBlank()) {
+                        repository.syncStudentProgressToTutor(
+                            profile = profile,
+                            decksCount = decksCount,
+                            recentSessions = sessions
+                        )
+                    }
                 }
             }
         }
@@ -362,12 +473,20 @@ class LingoViewModel(
     }
 
     fun awardXp(xp: Long) {
-        viewModelScope.launch {
-            repository.awardProgress(xpDelta = xp)
+        offlineStore?.awardProgress(xpDelta = xp)
+        if (!isOfflineMode) {
+            viewModelScope.launch {
+                repository.awardProgress(xpDelta = xp)
+            }
         }
     }
 
     fun updateLearningLevel(level: CefrLevel) {
+        offlineStore?.updateLearningLevel(level)
+        if (isOfflineMode) {
+            _statusBanner.value = "Learning level updated to ${level.label}!"
+            return
+        }
         viewModelScope.launch {
             repository.updateLearningLevel(level).onSuccess {
                 _statusBanner.value = "Learning level updated to ${level.label}!"
@@ -455,8 +574,11 @@ class LingoViewModel(
     }
 
     fun togglePinEvidence(cardId: String, pinned: Boolean) {
-        viewModelScope.launch {
-            repository.togglePinEvidence(cardId, pinned)
+        offlineStore?.togglePinEvidence(cardId, pinned)
+        if (!isOfflineMode) {
+            viewModelScope.launch {
+                repository.togglePinEvidence(cardId, pinned)
+            }
         }
     }
 
@@ -470,18 +592,30 @@ class LingoViewModel(
                 currentList.filterNot { it == wordId }
             }
             val currentMasteredTotal = currentProfileOrNull()?.weeklyWordsMastered ?: 0L
+            val delta = when {
+                isAdding -> 1L
+                currentMasteredTotal > 0L -> -1L
+                else -> 0L
+            }
+            val xp = if (isAdding) 5L else 0L
+            val newBadges = if (isAdding) computeProjectedBadges(weeklyWordsDelta = delta) else emptyList()
+
+            offlineStore?.updateWeeklyWordMastery(weekNumber, updatedList)
+            if (xp > 0L || delta != 0L || newBadges.isNotEmpty()) {
+                offlineStore?.awardProgress(
+                    xpDelta = xp,
+                    weeklyWordsMasteredDelta = delta,
+                    newEarnedBadges = newBadges
+                )
+            }
+            if (isOfflineMode) {
+                if (newBadges.isNotEmpty()) {
+                    _statusBanner.value = "Badge unlocked: ${newBadges.joinToString { it.title }}!"
+                }
+                return@launch
+            }
+
             repository.updateWeeklyWordMastery(weekNumber, updatedList).onSuccess {
-                val delta = when {
-                    isAdding -> 1L
-                    currentMasteredTotal > 0L -> -1L
-                    else -> 0L
-                }
-                val xp = if (isAdding) 5L else 0L
-                val newBadges = if (isAdding) {
-                    computeProjectedBadges(weeklyWordsDelta = delta)
-                } else {
-                    emptyList()
-                }
                 if (xp > 0L || delta != 0L || newBadges.isNotEmpty()) {
                     repository.awardProgress(
                         xpDelta = xp,
@@ -506,6 +640,30 @@ class LingoViewModel(
         wordsPracticed: Int
     ) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                val newlyCompleted = offlineStore.markWeeklySessionComplete(weekNumber, sessionNumber)
+                val xp = if (newlyCompleted) 40L else 15L
+                val sessionDelta = if (newlyCompleted) 1L else 0L
+                val newBadges = computeProjectedBadges(sessionsCompletedDelta = sessionDelta)
+                offlineStore.awardProgress(xpDelta = xp, sessionsCompletedDelta = sessionDelta, newEarnedBadges = newBadges)
+                offlineStore.logSessionRecord(
+                    activityType = ActivityType.WEEKLY_SESSION,
+                    title = "W$weekNumber S$sessionNumber: $title",
+                    cefrLevel = level,
+                    score = xp,
+                    accuracyPct = 100L,
+                    wordsPracticed = wordsPracticed.toLong(),
+                    durationMinutes = 15L
+                )
+                val badgeNote = if (newBadges.isNotEmpty()) " • Badge unlocked: ${newBadges.joinToString { it.title }}!" else ""
+                _statusBanner.value = if (newlyCompleted) {
+                    "Session $sessionNumber complete! +40 XP$badgeNote"
+                } else {
+                    "Session $sessionNumber reviewed! +15 XP$badgeNote"
+                }
+                return@launch
+            }
+
             repository.markWeeklySessionComplete(weekNumber, sessionNumber).onSuccess { newlyCompleted ->
                 val xp = if (newlyCompleted) 40L else 15L
                 val sessionDelta = if (newlyCompleted) 1L else 0L
@@ -549,9 +707,9 @@ class LingoViewModel(
         wordsPracticed: Int
     ) {
         viewModelScope.launch {
-            repository.recordWeeklyGamePlayed(weekNumber)
-            repository.awardProgress(xpDelta = scoreXp)
-            repository.logSessionRecord(
+            offlineStore?.recordWeeklyGamePlayed(weekNumber)
+            offlineStore?.awardProgress(xpDelta = scoreXp)
+            offlineStore?.logSessionRecord(
                 activityType = ActivityType.GAME,
                 title = title,
                 cefrLevel = level,
@@ -560,6 +718,19 @@ class LingoViewModel(
                 wordsPracticed = wordsPracticed.toLong(),
                 durationMinutes = 4L
             )
+            if (!isOfflineMode) {
+                repository.recordWeeklyGamePlayed(weekNumber)
+                repository.awardProgress(xpDelta = scoreXp)
+                repository.logSessionRecord(
+                    activityType = ActivityType.GAME,
+                    title = title,
+                    cefrLevel = level,
+                    score = scoreXp,
+                    accuracyPct = accuracyPct,
+                    wordsPracticed = wordsPracticed.toLong(),
+                    durationMinutes = 4L
+                )
+            }
             _statusBanner.value = "Game finished! +$scoreXp XP ($accuracyPct% accuracy)"
         }
     }
@@ -571,12 +742,12 @@ class LingoViewModel(
     ) {
         viewModelScope.launch {
             val newBadges = computeProjectedBadges(audiobooksDelta = 1L)
-            repository.awardProgress(
+            offlineStore?.awardProgress(
                 xpDelta = 30L,
                 audiobooksFinishedDelta = 1L,
                 newEarnedBadges = newBadges
             )
-            repository.logSessionRecord(
+            offlineStore?.logSessionRecord(
                 activityType = ActivityType.AUDIOBOOK,
                 title = title,
                 cefrLevel = level,
@@ -585,6 +756,22 @@ class LingoViewModel(
                 wordsPracticed = 8L,
                 durationMinutes = durationMin.toLong()
             )
+            if (!isOfflineMode) {
+                repository.awardProgress(
+                    xpDelta = 30L,
+                    audiobooksFinishedDelta = 1L,
+                    newEarnedBadges = newBadges
+                )
+                repository.logSessionRecord(
+                    activityType = ActivityType.AUDIOBOOK,
+                    title = title,
+                    cefrLevel = level,
+                    score = 30L,
+                    accuracyPct = 100L,
+                    wordsPracticed = 8L,
+                    durationMinutes = durationMin.toLong()
+                )
+            }
             val badgeNote = if (newBadges.isNotEmpty()) {
                 " • Badge unlocked: ${newBadges.joinToString { it.title }}!"
             } else {
@@ -606,13 +793,13 @@ class LingoViewModel(
                 bestScoreCandidate = score,
                 latestQuizAccuracyPct = accuracyPct
             )
-            repository.awardProgress(
+            offlineStore?.awardProgress(
                 xpDelta = 20L,
                 quizzesPlayedDelta = 1L,
                 bestLiveQuizScoreCandidate = score,
                 newEarnedBadges = newBadges
             )
-            repository.logSessionRecord(
+            offlineStore?.logSessionRecord(
                 activityType = ActivityType.QUIZ,
                 title = title,
                 cefrLevel = level,
@@ -621,7 +808,8 @@ class LingoViewModel(
                 wordsPracticed = 6L,
                 durationMinutes = 5L
             )
-            repository.publishScoreRecord(
+            offlineStore?.publishScoreRecord(
+                playerName = currentProfileOrNull()?.displayName ?: currentUserName,
                 quizTitle = title,
                 cefrLevel = level,
                 score = score,
@@ -630,6 +818,32 @@ class LingoViewModel(
                 gameMode = "LIVE_QUIZ",
                 avatarColor = "INDIGO"
             )
+            if (!isOfflineMode) {
+                repository.awardProgress(
+                    xpDelta = 20L,
+                    quizzesPlayedDelta = 1L,
+                    bestLiveQuizScoreCandidate = score,
+                    newEarnedBadges = newBadges
+                )
+                repository.logSessionRecord(
+                    activityType = ActivityType.QUIZ,
+                    title = title,
+                    cefrLevel = level,
+                    score = score,
+                    accuracyPct = accuracyPct,
+                    wordsPracticed = 6L,
+                    durationMinutes = 5L
+                )
+                repository.publishScoreRecord(
+                    quizTitle = title,
+                    cefrLevel = level,
+                    score = score,
+                    accuracyPct = accuracyPct,
+                    streak = 1L,
+                    gameMode = "LIVE_QUIZ",
+                    avatarColor = "INDIGO"
+                )
+            }
             if (newBadges.isNotEmpty()) {
                 _statusBanner.value = "Badge unlocked: ${newBadges.joinToString { it.title }}!"
             }
@@ -642,8 +856,8 @@ class LingoViewModel(
     ) {
         viewModelScope.launch {
             val newBadges = computeProjectedBadges(roleplayCompleted = true)
-            repository.awardProgress(xpDelta = 25L, newEarnedBadges = newBadges)
-            repository.logSessionRecord(
+            offlineStore?.awardProgress(xpDelta = 25L, newEarnedBadges = newBadges)
+            offlineStore?.logSessionRecord(
                 activityType = ActivityType.ROLEPLAY,
                 title = title,
                 cefrLevel = level,
@@ -652,6 +866,18 @@ class LingoViewModel(
                 wordsPracticed = 10L,
                 durationMinutes = 6L
             )
+            if (!isOfflineMode) {
+                repository.awardProgress(xpDelta = 25L, newEarnedBadges = newBadges)
+                repository.logSessionRecord(
+                    activityType = ActivityType.ROLEPLAY,
+                    title = title,
+                    cefrLevel = level,
+                    score = 25L,
+                    accuracyPct = 100L,
+                    wordsPracticed = 10L,
+                    durationMinutes = 6L
+                )
+            }
             if (newBadges.isNotEmpty()) {
                 _statusBanner.value = "Badge unlocked: ${newBadges.joinToString { it.title }}!"
             }
@@ -802,6 +1028,13 @@ class LingoViewModel(
         onDone: () -> Unit
     ) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                offlineStore.saveCustomQuiz(title, topic, cefrLevel, questions)
+                offlineStore.awardProgress(xpDelta = 25L)
+                _statusBanner.value = "Saved quiz '$title' offline!"
+                onDone()
+                return@launch
+            }
             _isBusy.value = true
             val result = repository.saveCustomQuiz(title, topic, cefrLevel, questions)
             _isBusy.value = false
@@ -817,6 +1050,10 @@ class LingoViewModel(
 
     fun deleteCustomQuiz(quizId: String) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                offlineStore.deleteCustomQuiz(quizId)
+                return@launch
+            }
             repository.deleteCustomQuiz(quizId).onFailure {
                 _statusBanner.value = it.message ?: "Failed to delete quiz."
             }
@@ -829,6 +1066,10 @@ class LingoViewModel(
         cards: List<FlashcardItem>,
         onDone: () -> Unit
     ) {
+        if (isOfflineMode) {
+            _statusBanner.value = "Connect to the internet to save custom decks to the cloud."
+            return
+        }
         viewModelScope.launch {
             _isBusy.value = true
             val result = repository.saveCustomDeck(title, cefrLevel, cards)
@@ -850,6 +1091,7 @@ class LingoViewModel(
         cards: List<FlashcardItem>,
         onDone: () -> Unit
     ) {
+        if (isOfflineMode) return
         viewModelScope.launch {
             _isBusy.value = true
             val result = repository.updateCustomDeck(deckId, title, cefrLevel, cards)
@@ -864,6 +1106,7 @@ class LingoViewModel(
     }
 
     fun deleteCustomDeck(deckId: String) {
+        if (isOfflineMode) return
         viewModelScope.launch {
             repository.deleteCustomDeck(deckId).onSuccess {
                 _statusBanner.value = "Deleted flashcard deck."
@@ -875,15 +1118,19 @@ class LingoViewModel(
 
     fun toggleCardMastery(deckId: String, cardIndex: Int, newMastered: Boolean) {
         viewModelScope.launch {
+            val currentCards = (userProfileState.value as? UiState.Success)?.data?.cardsMastered ?: 0L
+            val delta = when {
+                newMastered -> 1L
+                currentCards > 0L -> -1L
+                else -> 0L
+            }
+            val xp = if (newMastered) 10L else 0L
+            offlineStore?.toggleCardMastery(deckId, cardIndex, newMastered)
+            offlineStore?.awardProgress(xpDelta = xp, cardsMasteredDelta = delta)
+            if (isOfflineMode) return@launch
+
             val result = repository.toggleCardMastery(deckId, cardIndex, newMastered)
             result.onSuccess {
-                val currentCards = (userProfileState.value as? UiState.Success)?.data?.cardsMastered ?: 0L
-                val delta = when {
-                    newMastered -> 1L
-                    currentCards > 0L -> -1L
-                    else -> 0L
-                }
-                val xp = if (newMastered) 10L else 0L
                 repository.awardProgress(xpDelta = xp, cardsMasteredDelta = delta)
             }.onFailure {
                 _statusBanner.value = it.message ?: "Failed to update mastery."
@@ -902,8 +1149,8 @@ class LingoViewModel(
             val safeTotal = totalCards.coerceAtLeast(1)
             val acc = ((masteredCount * 100L) / safeTotal).coerceIn(0L, 100L)
             val xp = (reviewedCount.coerceAtLeast(1) * 5L).coerceAtMost(60L)
-            repository.awardProgress(xpDelta = xp)
-            repository.logSessionRecord(
+            offlineStore?.awardProgress(xpDelta = xp)
+            offlineStore?.logSessionRecord(
                 activityType = ActivityType.CARDS,
                 title = "Studied: $deckTitle",
                 cefrLevel = cefrLevel,
@@ -912,6 +1159,18 @@ class LingoViewModel(
                 wordsPracticed = reviewedCount.toLong().coerceIn(1L, 200L),
                 durationMinutes = (reviewedCount / 3).coerceIn(1, 30).toLong()
             )
+            if (!isOfflineMode) {
+                repository.awardProgress(xpDelta = xp)
+                repository.logSessionRecord(
+                    activityType = ActivityType.CARDS,
+                    title = "Studied: $deckTitle",
+                    cefrLevel = cefrLevel,
+                    score = xp,
+                    accuracyPct = acc,
+                    wordsPracticed = reviewedCount.toLong().coerceIn(1L, 200L),
+                    durationMinutes = (reviewedCount / 3).coerceIn(1, 30).toLong()
+                )
+            }
             _statusBanner.value = "Study session saved! +$xp XP ($masteredCount/$safeTotal mastered)"
         }
     }
@@ -1220,6 +1479,13 @@ class LingoViewModel(
         onDone: () -> Unit = {}
     ) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                val created = offlineStore.createOfflineTeam(name, cefrLevel, motto, accentColor, isTeacherHub)
+                _selectedTeamId.value = created.id
+                _statusBanner.value = "Offline team '${created.name}' created!"
+                onDone()
+                return@launch
+            }
             _isBusy.value = true
             val creatorName = currentProfileOrNull()?.displayName?.ifBlank { currentUserName } ?: currentUserName
             val kind = if (isTeacherHub && isBootstrappedTutor) TeamChannelKind.TEACHER_HUB else TeamChannelKind.TEAM
@@ -1248,6 +1514,12 @@ class LingoViewModel(
 
     fun joinTeam(team: TeamChannel) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                offlineStore.joinOfflineTeam(team)
+                _selectedTeamId.value = team.id
+                _statusBanner.value = "Joined ${team.name}!"
+                return@launch
+            }
             val prevTeamId = currentProfileOrNull()?.teamId.orEmpty()
             repository.joinTeam(team, prevTeamId).onSuccess {
                 _selectedTeamId.value = team.id
@@ -1274,6 +1546,22 @@ class LingoViewModel(
                 else -> ChatSenderRole.PLAYER
             }
             val canPin = pinned && (isBootstrappedTutor || team.leaderUid == currentUserId)
+            if (isOfflineMode && offlineStore != null) {
+                offlineStore.appendOfflineMessage(
+                    ChatMessage(
+                        id = java.util.UUID.randomUUID().toString(),
+                        teamId = team.id,
+                        senderUid = currentUserId,
+                        senderName = senderName,
+                        senderTeamName = senderTeamName,
+                        senderRole = role.name,
+                        text = text.trim(),
+                        pinned = canPin,
+                        createdAt = com.google.firebase.Timestamp(java.util.Date(System.currentTimeMillis()))
+                    )
+                )
+                return@launch
+            }
             repository.sendTeamMessage(
                 teamId = team.id,
                 senderName = senderName,
@@ -1289,6 +1577,10 @@ class LingoViewModel(
 
     fun togglePinMessage(teamId: String, messageId: String, pinned: Boolean) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                offlineStore.toggleOfflineMessagePin(teamId, messageId, pinned)
+                return@launch
+            }
             repository.toggleMessagePin(teamId, messageId, pinned).onFailure {
                 _statusBanner.value = it.message ?: "Could not update pin."
             }
@@ -1297,6 +1589,10 @@ class LingoViewModel(
 
     fun deleteChatMessage(teamId: String, messageId: String) {
         viewModelScope.launch {
+            if (isOfflineMode && offlineStore != null) {
+                offlineStore.deleteOfflineMessage(teamId, messageId)
+                return@launch
+            }
             repository.deleteTeamMessage(teamId, messageId).onFailure {
                 _statusBanner.value = it.message ?: "Could not delete message."
             }

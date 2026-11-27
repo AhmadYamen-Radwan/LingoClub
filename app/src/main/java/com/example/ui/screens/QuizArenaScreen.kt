@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.TipsAndUpdates
 import androidx.compose.material3.AlertDialog
@@ -105,6 +106,7 @@ import com.example.ui.components.CefrFilterRow
 import com.example.ui.components.KahootShapeGlyph
 import com.example.ui.components.LiveRoomChatSheet
 import com.example.ui.components.LiveRoomChatTickerBar
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.Trophy3DFigure
 import com.example.ui.components.avatarColorForTag
 import com.example.ui.components.kahootTileColor
@@ -129,6 +131,21 @@ private data class LocalQuizSession(
     val selectedOption: Int? = null,
     val showSummary: Boolean = false
 )
+
+internal fun prepareDynamicQuizQuestions(questions: List<QuizQuestionItem>): List<QuizQuestionItem> {
+    return questions.shuffled().map { q ->
+        if (q.options.size <= 1) {
+            q
+        } else {
+            val indexed = q.options.mapIndexed { idx, opt -> idx to opt }.shuffled()
+            val newCorrect = indexed.indexOfFirst { it.first.toLong() == q.correctIndex }.coerceAtLeast(0)
+            q.copy(
+                options = indexed.map { it.second },
+                correctIndex = newCorrect.toLong()
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -160,6 +177,7 @@ fun QuizArenaScreen(
     currentUserId: String = "",
     onSendRoomMessage: (text: String, type: RoomMessageType) -> Unit = { _, _ -> },
     onDeleteRoomMessage: (messageId: String) -> Unit = {},
+    onNavigateLeaderboard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var localQuiz by remember { mutableStateOf<LocalQuizSession?>(null) }
@@ -263,6 +281,17 @@ fun QuizArenaScreen(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = onNavigateLeaderboard,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("quiz_leaderboard_button")
+                        ) {
+                            Icon(Icons.Filled.Leaderboard, contentDescription = "Global Leaderboard", modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Ranks", maxLines = 1)
+                        }
                         Button(
                             onClick = {
                                 onClearAiQuizGen()
@@ -417,7 +446,9 @@ fun QuizArenaScreen(
                         subtitle = "Teacher ${item.authorName.ifBlank { "Admin" }} • ${item.topic} • ${item.questions.size} Qs",
                         level = level,
                         onHostLive = { onHostLiveRoom(item.title, level, item.questions) },
-                        onPlaySolo = { localQuiz = LocalQuizSession(item.title, level, item.questions) },
+                        onPlaySolo = {
+                            localQuiz = LocalQuizSession(item.title, level, prepareDynamicQuizQuestions(item.questions))
+                        },
                         onDelete = null
                     )
                 }
@@ -440,7 +471,9 @@ fun QuizArenaScreen(
                         subtitle = "${quiz.topic} • ${quiz.questions.size} questions",
                         level = level,
                         onHostLive = { onHostLiveRoom(quiz.title, level, quiz.questions) },
-                        onPlaySolo = { localQuiz = LocalQuizSession(quiz.title, level, quiz.questions) },
+                        onPlaySolo = {
+                            localQuiz = LocalQuizSession(quiz.title, level, prepareDynamicQuizQuestions(quiz.questions))
+                        },
                         onDelete = { onDeleteCustomQuiz(quiz.id) }
                     )
                 }
@@ -481,7 +514,9 @@ fun QuizArenaScreen(
                         subtitle = "${pack.description} (${pack.questions.size} Qs)",
                         level = pack.cefrLevel,
                         onHostLive = { onHostLiveRoom(pack.title, pack.cefrLevel, pack.questions) },
-                        onPlaySolo = { localQuiz = LocalQuizSession(pack.title, pack.cefrLevel, pack.questions) },
+                        onPlaySolo = {
+                            localQuiz = LocalQuizSession(pack.title, pack.cefrLevel, prepareDynamicQuizQuestions(pack.questions))
+                        },
                         onDelete = null
                     )
                 }
@@ -853,7 +888,7 @@ private fun LiveMultiplayerRoomView(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
+                                TranslatableEnglishText(
                                     text = question.prompt,
                                     style = MaterialTheme.typography.headlineSmall,
                                     modifier = Modifier.padding(22.dp)
@@ -930,7 +965,12 @@ private fun LiveMultiplayerRoomView(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Icon(Icons.Filled.TipsAndUpdates, contentDescription = null, tint = MintTertiary)
-                                            Text(question.tip, color = MintOnSoft, style = MaterialTheme.typography.bodyMedium)
+                                            TranslatableEnglishText(
+                                                text = question.tip,
+                                                color = MintOnSoft,
+                                                underlineColor = MintTertiary,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
                                         }
                                     }
                                 }
@@ -1073,18 +1113,47 @@ private fun LocalKahootArena(
                         }
                     }
                 } else {
+                    val totalLimit = q.timeLimitSec.toInt().coerceAtLeast(15)
+                    var soloSecondsLeft by remember(session.currentIndex, session.title) { mutableIntStateOf(totalLimit) }
+                    LaunchedEffect(session.currentIndex, session.selectedOption, session.title) {
+                        if (session.selectedOption == null) {
+                            while (soloSecondsLeft > 0) {
+                                delay(1000)
+                                soloSecondsLeft--
+                            }
+                            if (soloSecondsLeft == 0 && session.selectedOption == null) {
+                                onSelectOption(-1)
+                            }
+                        }
+                    }
+                    val timerBarProgress by animateFloatAsState(
+                        targetValue = (soloSecondsLeft.toFloat() / totalLimit.toFloat()).coerceIn(0f, 1f),
+                        animationSpec = tween(320),
+                        label = "solo_quiz_timer"
+                    )
                     LinearProgressIndicator(
-                        progress = { (session.currentIndex + 1).toFloat() / session.questions.size.toFloat() },
+                        progress = { timerBarProgress },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(RoundedCornerShape(99.dp))
                     )
-                Text(
-                    text = "Question ${session.currentIndex + 1} of ${session.questions.size} • Streak ${session.streak}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Question ${session.currentIndex + 1} of ${session.questions.size} • Streak ${session.streak}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${soloSecondsLeft}s",
+                        fontWeight = FontWeight.Bold,
+                        color = if (soloSecondsLeft <= 5) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Card(
                     shape = RoundedCornerShape(24.dp),
@@ -1092,7 +1161,7 @@ private fun LocalKahootArena(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
+                    TranslatableEnglishText(
                         text = q.prompt,
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.padding(22.dp)
@@ -1138,7 +1207,12 @@ private fun LocalKahootArena(
                                     )
                                 }
                                 if (q.tip.isNotBlank()) {
-                                    Text(text = q.tip, color = feedbackTextColor, style = MaterialTheme.typography.bodyMedium)
+                                    TranslatableEnglishText(
+                                        text = q.tip,
+                                        color = feedbackTextColor,
+                                        underlineColor = feedbackTextColor,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 }
                             }
                         }

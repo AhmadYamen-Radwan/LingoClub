@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SportsEsports
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.SportsEsports
@@ -84,6 +86,9 @@ import com.example.auth.AuthScreen
 import com.example.auth.signOutWithCleanup
 import com.example.data.firebase.LingoRepository
 import com.example.data.model.CefrLevel
+import com.example.data.offline.OfflineLocalStore
+import com.example.data.offline.TetheringHubManager
+import com.example.ui.GameViewModel
 import com.example.ui.LingoViewModel
 import com.example.ui.UiState
 import com.example.ui.screens.ArcadeMode
@@ -91,6 +96,7 @@ import com.example.ui.screens.AudiobooksScreen
 import com.example.ui.screens.CardsScreen
 import com.example.ui.screens.DictionaryScreen
 import com.example.ui.screens.GamesArcadeScreen
+import com.example.ui.screens.GlobalLeaderboardScreen
 import com.example.ui.screens.GuessingScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ProfileScreen
@@ -110,6 +116,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 const val ROUTE_HOME = "home"
 const val ROUTE_QUIZ = "quiz"
 const val ROUTE_ARCADE = "arcade"
+const val ROUTE_LEADERBOARD = "leaderboard"
 const val ROUTE_CURRICULUM = "curriculum"
 const val ROUTE_AUDIOBOOKS = "audiobooks"
 const val ROUTE_CHAT = "chat"
@@ -139,6 +146,7 @@ private val BottomDestinations = listOf(
 private val RailDestinations = listOf(
     NavDestination(ROUTE_HOME, "Club", Icons.Filled.Home, Icons.Outlined.Home),
     NavDestination(ROUTE_QUIZ, "Quiz", Icons.Filled.Bolt, Icons.Outlined.Bolt),
+    NavDestination(ROUTE_LEADERBOARD, "Ranks", Icons.Filled.Leaderboard, Icons.Outlined.Leaderboard),
     NavDestination(ROUTE_ARCADE, "Arcade", Icons.Filled.SportsEsports, Icons.Outlined.SportsEsports),
     NavDestination(ROUTE_CURRICULUM, "200 Words", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     NavDestination(ROUTE_AUDIOBOOKS, "Listen", Icons.Filled.Headphones, Icons.Outlined.Headphones),
@@ -168,23 +176,46 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LingoAppRoot() {
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    var offlineDisplayName by rememberSaveable { mutableStateOf<String?>(null) }
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
             currentUser = auth.currentUser
+            if (auth.currentUser != null) {
+                offlineDisplayName = null
+            }
         }
         Firebase.auth.addAuthStateListener(listener)
         onDispose { Firebase.auth.removeAuthStateListener(listener) }
     }
 
     val user = currentUser
-    if (user == null) {
-        AuthScreen(onAuthSuccess = { currentUser = Firebase.auth.currentUser })
-    } else {
-        key(user.uid) {
-            AuthenticatedStudioShell(
-                currentUserId = user.uid,
-                currentUserName = user.displayName ?: "Lingo Member"
+    val activeOfflineName = offlineDisplayName
+    when {
+        user != null -> {
+            key(user.uid) {
+                AuthenticatedStudioShell(
+                    currentUserId = user.uid,
+                    currentUserName = user.displayName ?: "Lingo Member",
+                    isOfflineMode = false,
+                    onExitOfflineMode = {}
+                )
+            }
+        }
+        activeOfflineName != null -> {
+            key("offline_$activeOfflineName") {
+                AuthenticatedStudioShell(
+                    currentUserId = "offline_local_player",
+                    currentUserName = activeOfflineName,
+                    isOfflineMode = true,
+                    onExitOfflineMode = { offlineDisplayName = null }
+                )
+            }
+        }
+        else -> {
+            AuthScreen(
+                onAuthSuccess = { currentUser = Firebase.auth.currentUser },
+                onContinueOffline = { chosenName -> offlineDisplayName = chosenName }
             )
         }
     }
@@ -193,10 +224,22 @@ fun LingoAppRoot() {
 @Composable
 private fun AuthenticatedStudioShell(
     currentUserId: String,
-    currentUserName: String
+    currentUserName: String,
+    isOfflineMode: Boolean = false,
+    onExitOfflineMode: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val offlineStore = remember(context, currentUserId, currentUserName) {
+        OfflineLocalStore(
+            context = context.applicationContext,
+            userId = currentUserId,
+            defaultDisplayName = currentUserName
+        )
+    }
+    val tetheringHub = remember(context) { TetheringHubManager(context.applicationContext) }
+
     val viewModel: LingoViewModel = viewModel(
-        key = currentUserId,
+        key = "${currentUserId}_$isOfflineMode",
         factory = viewModelFactory {
             initializer {
                 val app = checkNotNull(this[APPLICATION_KEY]) {
@@ -207,13 +250,35 @@ private fun AuthenticatedStudioShell(
                 LingoViewModel(
                     repository = LingoRepository(db),
                     currentUserId = currentUserId,
-                    currentUserName = currentUserName
+                    currentUserName = currentUserName,
+                    isOfflineMode = isOfflineMode,
+                    offlineStore = offlineStore
                 )
             }
         }
     )
 
-    val context = LocalContext.current
+    val gameViewModel: GameViewModel = viewModel(
+        key = "game_${currentUserId}_$isOfflineMode",
+        factory = viewModelFactory {
+            initializer {
+                val app = checkNotNull(this[APPLICATION_KEY]) {
+                    "APPLICATION_KEY missing from CreationExtras"
+                }
+                val databaseId = app.getString(R.string.firestore_database_id)
+                val db = FirebaseFirestore.getInstance(databaseId)
+                GameViewModel(
+                    repository = LingoRepository(db),
+                    offlineStore = offlineStore,
+                    tetheringHub = tetheringHub,
+                    currentUserId = currentUserId,
+                    currentUserName = currentUserName,
+                    isOfflineMode = isOfflineMode
+                )
+            }
+        }
+    )
+
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
@@ -224,7 +289,12 @@ private fun AuthenticatedStudioShell(
     val customQuizzesState by viewModel.customQuizzesState.collectAsStateWithLifecycle()
     val customDecksState by viewModel.customDecksState.collectAsStateWithLifecycle()
     val cardMasteryMap by viewModel.cardMasteryState.collectAsStateWithLifecycle()
-    val roomSession by viewModel.roomSession.collectAsStateWithLifecycle()
+    val gameRoomSession by gameViewModel.roomSession.collectAsStateWithLifecycle()
+    val puzzleStats by gameViewModel.puzzleProgressState.collectAsStateWithLifecycle()
+    val globalScoresState by gameViewModel.globalScoresState.collectAsStateWithLifecycle()
+    val tetheringState by gameViewModel.tetheringState.collectAsStateWithLifecycle()
+    val gameBanner by gameViewModel.gameBanner.collectAsStateWithLifecycle()
+    val gameBusy by gameViewModel.isBusy.collectAsStateWithLifecycle()
     val statusBanner by viewModel.statusBanner.collectAsStateWithLifecycle()
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
     val aiQuizGenState by viewModel.aiQuizGenState.collectAsStateWithLifecycle()
@@ -236,7 +306,11 @@ private fun AuthenticatedStudioShell(
     val selectedTeamId by viewModel.selectedTeamId.collectAsStateWithLifecycle()
     val chatMessagesState by viewModel.chatMessagesState.collectAsStateWithLifecycle()
     val clubContentState by viewModel.clubContentState.collectAsStateWithLifecycle()
-    val currentUserTeamId = (profileState as? UiState.Success)?.data?.teamId.orEmpty()
+    val currentUserProfile = (profileState as? UiState.Success)?.data
+    val currentUserTeamId = currentUserProfile?.teamId.orEmpty()
+    val pinnedEvidenceIds = remember(currentUserProfile?.pinnedEvidenceIds) {
+        currentUserProfile?.pinnedEvidenceIds?.toSet().orEmpty()
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(statusBanner) {
@@ -244,6 +318,13 @@ private fun AuthenticatedStudioShell(
         if (msg != null) {
             snackbarHostState.showSnackbar(msg)
             viewModel.clearBanner()
+        }
+    }
+    LaunchedEffect(gameBanner) {
+        val msg = gameBanner
+        if (msg != null) {
+            snackbarHostState.showSnackbar(msg)
+            gameViewModel.clearBanner()
         }
     }
 
@@ -346,9 +427,11 @@ private fun AuthenticatedStudioShell(
                                 isTutor = viewModel.isBootstrappedTutor,
                                 studentsCount = (studentsProgressState as? UiState.Success)?.data?.size ?: 0,
                                 fallbackName = currentUserName,
+                                isOfflineMode = isOfflineMode,
                                 selectedLevel = selectedLevel,
                                 onSelectLevel = { selectedLevel = it },
                                 onNavigateQuiz = { navigateTop(ROUTE_QUIZ) },
+                                onNavigateLeaderboard = { navigateTop(ROUTE_LEADERBOARD) },
                                 onNavigateArcade = {
                                     arcadeInitialMode = ArcadeMode.WORD_DASH
                                     navigateTop(ROUTE_ARCADE)
@@ -372,19 +455,33 @@ private fun AuthenticatedStudioShell(
                                     navigateTop(ROUTE_QUIZ)
                                 },
                                 onSignOut = {
+                                    gameViewModel.cleanupListeners()
                                     viewModel.cleanupListenersBeforeSignOut()
-                                    signOutWithCleanup(credentialManager, scope)
+                                    if (isOfflineMode) {
+                                        onExitOfflineMode()
+                                    } else {
+                                        signOutWithCleanup(credentialManager, scope)
+                                    }
                                 }
+                            )
+                        }
+                        composable(ROUTE_LEADERBOARD) {
+                            GlobalLeaderboardScreen(
+                                scoresState = globalScoresState,
+                                currentUserId = currentUserId,
+                                selectedLevel = selectedLevel,
+                                onSelectLevel = { selectedLevel = it },
+                                onBack = if (useRail) null else { { navController.popBackStack() } }
                             )
                         }
                         composable(ROUTE_QUIZ) {
                             QuizArenaScreen(
                                 customQuizzesState = customQuizzesState,
                                 clubContentState = clubContentState,
-                                roomSession = roomSession,
+                                roomSession = gameRoomSession,
                                 aiQuizGenState = aiQuizGenState,
                                 defaultNickname = currentUserName,
-                                isBusy = isBusy,
+                                isBusy = isBusy || gameBusy,
                                 initialJoinPin = prefilledPin,
                                 prefilledAiTopic = prefilledAiTopic,
                                 prefilledAiLevel = prefilledAiLevel,
@@ -397,15 +494,15 @@ private fun AuthenticatedStudioShell(
                                 selectedLevel = selectedLevel,
                                 onSelectLevel = { selectedLevel = it },
                                 onHostLiveRoom = { title, level, qs ->
-                                    viewModel.hostLiveRoom(title, level, qs)
+                                    gameViewModel.hostLiveRoom(title, level, qs)
                                 },
                                 onJoinLiveRoom = { pin, nick, avatar ->
                                     prefilledPin = ""
-                                    viewModel.joinLiveRoom(pin, nick, avatar)
+                                    gameViewModel.joinLiveRoom(pin, nick, avatar)
                                 },
-                                onHostNextPhase = { viewModel.hostStartOrNextQuestion() },
-                                onSubmitLiveAnswer = { idx -> viewModel.submitLiveAnswer(idx) },
-                                onLeaveLiveRoom = { viewModel.leaveLiveRoom() },
+                                onHostNextPhase = { gameViewModel.hostStartOrNextQuestion() },
+                                onSubmitLiveAnswer = { idx -> gameViewModel.submitLiveAnswer(idx) },
+                                onLeaveLiveRoom = { gameViewModel.leaveLiveRoom() },
                                 onSaveCustomQuiz = { title, topic, level, qs, onDone ->
                                     viewModel.saveCustomQuiz(title, topic, level, qs, onDone)
                                 },
@@ -415,16 +512,23 @@ private fun AuthenticatedStudioShell(
                                 },
                                 onClearAiQuizGen = { viewModel.clearAiQuizGen() },
                                 onRecordQuizCompletion = { title, lvl, score, acc ->
-                                    viewModel.recordQuizCompletion(title, lvl, score, acc)
+                                    gameViewModel.recordQuizCompletion(
+                                        title = title,
+                                        level = lvl,
+                                        score = score,
+                                        accuracyPct = acc,
+                                        profileSnapshot = currentUserProfile
+                                    )
                                 },
-                                onAwardXp = { xp -> viewModel.awardXp(xp) },
+                                onAwardXp = { xp -> gameViewModel.awardXp(xp) },
                                 currentUserId = currentUserId,
                                 onSendRoomMessage = { text, type ->
-                                    viewModel.sendRoomChatMessage(text, type)
+                                    gameViewModel.sendRoomChatMessage(text, type)
                                 },
                                 onDeleteRoomMessage = { messageId ->
-                                    viewModel.deleteRoomChatMessage(messageId)
-                                }
+                                    gameViewModel.deleteRoomChatMessage(messageId)
+                                },
+                                onNavigateLeaderboard = { navigateTop(ROUTE_LEADERBOARD) }
                             )
                         }
                         composable(ROUTE_ARCADE) {
@@ -442,18 +546,24 @@ private fun AuthenticatedStudioShell(
                                 },
                                 onOpenChatTab = { navigateTop(ROUTE_CHAT) },
                                 onRecordArcadeResult = { title, lvl, xp, acc, count, combo ->
-                                    viewModel.recordArcadeGameResult(
+                                    gameViewModel.recordArcadeGameResult(
                                         gameTitle = title,
                                         cefrLevel = lvl,
                                         scoreXp = xp,
                                         accuracyPct = acc,
                                         wordsPracticed = count,
-                                        maxCombo = combo
+                                        maxCombo = combo,
+                                        profileSnapshot = currentUserProfile
                                     )
                                 },
                                 onNavigateQuiz = { navigateTop(ROUTE_QUIZ) },
                                 onNavigateRoleplay = { navigateTop(ROUTE_ROLEPLAY) },
                                 onNavigatePuzzles = { navigateTop(ROUTE_PUZZLES) },
+                                pinnedEvidenceIds = pinnedEvidenceIds,
+                                onTogglePinEvidence = { cardId, pin ->
+                                    viewModel.togglePinEvidence(cardId, pin)
+                                },
+                                onAwardXp = { xp -> gameViewModel.awardXp(xp) },
                                 onBack = if (useRail) null else { { navController.popBackStack() } }
                             )
                         }
@@ -512,6 +622,18 @@ private fun AuthenticatedStudioShell(
                                 onDeleteMessage = { teamId, messageId ->
                                     viewModel.deleteChatMessage(teamId, messageId)
                                 },
+                                tetheringState = tetheringState,
+                                onHostTetheringTeam = { teamName, level, motto ->
+                                    gameViewModel.hostTetheringTeam(teamName, level, motto)
+                                },
+                                onScanTetheringTeams = { gameViewModel.scanTetheringTeams() },
+                                onJoinTetheringTeam = { hostIp, port, teamCode ->
+                                    gameViewModel.joinTetheringTeam(hostIp, port, teamCode)
+                                },
+                                onSendTetheringMessage = { text, pinned ->
+                                    gameViewModel.sendTetheringChatMessage(text, pinned)
+                                },
+                                onDisconnectTethering = { gameViewModel.disconnectTethering() },
                                 onBack = if (useRail) null else { { navController.popBackStack() } }
                             )
                         }
@@ -546,13 +668,19 @@ private fun AuthenticatedStudioShell(
                                 profileState = profileState,
                                 sessionHistoryState = sessionHistoryState,
                                 fallbackName = currentUserName,
+                                isOfflineMode = isOfflineMode,
                                 onSelectLearningLevel = { lvl ->
                                     viewModel.updateLearningLevel(lvl)
                                     selectedLevel = lvl
                                 },
                                 onSignOut = {
+                                    gameViewModel.cleanupListeners()
                                     viewModel.cleanupListenersBeforeSignOut()
-                                    signOutWithCleanup(credentialManager, scope)
+                                    if (isOfflineMode) {
+                                        onExitOfflineMode()
+                                    } else {
+                                        signOutWithCleanup(credentialManager, scope)
+                                    }
                                 },
                                 onBack = if (useRail) null else { { navController.popBackStack() } }
                             )
@@ -560,7 +688,11 @@ private fun AuthenticatedStudioShell(
                         composable(ROUTE_PUZZLES) {
                             PuzzlesScreen(
                                 clubContentState = clubContentState,
-                                onAwardXp = { xp -> viewModel.awardXp(xp) },
+                                puzzleStats = puzzleStats,
+                                onAwardXp = { xp -> gameViewModel.awardXp(xp) },
+                                onRecordPuzzleSolved = { title, lvl, xp ->
+                                    gameViewModel.recordPuzzleSolved(title, lvl, xp)
+                                },
                                 selectedLevel = selectedLevel,
                                 onSelectLevel = { selectedLevel = it },
                                 teamsState = teamsState,

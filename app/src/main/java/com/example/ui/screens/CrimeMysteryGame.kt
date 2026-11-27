@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.CefrLevel
 import com.example.ui.components.CelebrationConfettiBurst
 import com.example.ui.components.CefrBadge
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.Trophy3DFigure
 import com.example.ui.theme.AmberAccent
 import com.example.ui.theme.AmberOnSoft
@@ -350,7 +351,7 @@ internal fun CrimeMysteryGame(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
-                            Text(
+                            TranslatableEnglishText(
                                 text = currentCase.crimeSceneSummary,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -405,9 +406,10 @@ internal fun CrimeMysteryGame(
                                         tint = AmberOnSoft,
                                         modifier = Modifier.size(18.dp)
                                     )
-                                    Text(
+                                    TranslatableEnglishText(
                                         text = currentCase.detectiveClue,
                                         color = AmberOnSoft,
+                                        underlineColor = AmberOnSoft,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold
                                     )
@@ -524,15 +526,17 @@ internal fun CrimeMysteryGame(
                                 modifier = Modifier.padding(10.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text(
+                                TranslatableEnglishText(
                                     text = "Statement / Alibi: \"${suspect.alibi}\"",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = cardFg
+                                    color = cardFg,
+                                    underlineColor = if (isSelected) MaterialTheme.colorScheme.primary else cardFg
                                 )
-                                Text(
+                                TranslatableEnglishText(
                                     text = "Suspicious Evidence: ${suspect.suspiciousDetail}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = cardFg.copy(alpha = 0.9f),
+                                    underlineColor = if (isSelected) MaterialTheme.colorScheme.primary else cardFg,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }

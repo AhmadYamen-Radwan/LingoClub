@@ -55,6 +55,7 @@ import com.example.data.model.CefrLevel
 import com.example.data.model.WeeklySessionPlan
 import com.example.data.model.WeeklyVocabWord
 import com.example.ui.components.CefrBadge
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.Trophy3DFigure
 import com.example.ui.theme.AmberOnSoft
 import com.example.ui.theme.AmberSoft
@@ -79,7 +80,7 @@ fun StoryChainInteractiveCard(
     onWordPracticed: (String) -> Unit,
     onFinishChain: (title: String, level: CefrLevel, xp: Long, accuracyPct: Long, wordsCount: Int) -> Unit
 ) {
-    var seed by remember(weekNumber, sessionPlan.sessionNumber) { mutableIntStateOf(0) }
+    var seed by remember(weekNumber, sessionPlan.sessionNumber) { mutableIntStateOf(kotlin.random.Random.nextInt(10000)) }
     val storyDeck = remember(weekNumber, sessionPlan.sessionNumber, seed) {
         sessionWords.shuffled().take(6)
     }
@@ -127,10 +128,11 @@ fun StoryChainInteractiveCard(
                         color = IndigoOnSoft
                     )
                 }
-                Text(
+                TranslatableEnglishText(
                     text = sessionPlan.storyOpening,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = IndigoOnSoft.copy(alpha = 0.9f)
+                    color = IndigoOnSoft.copy(alpha = 0.9f),
+                    underlineColor = IndigoOnSoft
                 )
             }
         }
@@ -154,10 +156,11 @@ fun StoryChainInteractiveCard(
                         color = MaterialTheme.colorScheme.onPrimary,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
+                    TranslatableEnglishText(
                         text = sessionPlan.storyClosing,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
+                        underlineColor = MaterialTheme.colorScheme.onPrimary
                     )
                     Text(
                         text = "Story Accuracy: $accuracy%",
@@ -353,7 +356,7 @@ private fun MeaningBlitzGame(
     tts: TtsSpeaker,
     onFinished: (title: String, level: CefrLevel, xp: Long, accuracyPct: Long, wordsCount: Int) -> Unit
 ) {
-    var seed by remember(weekNumber, sessionNumber) { mutableIntStateOf(0) }
+    var seed by remember(weekNumber, sessionNumber) { mutableIntStateOf(kotlin.random.Random.nextInt(10000)) }
     val deck = remember(weekNumber, sessionNumber, seed) { words.shuffled().take(6) }
     var index by remember(weekNumber, sessionNumber, seed) { mutableIntStateOf(0) }
     var score by remember(weekNumber, sessionNumber, seed) { mutableIntStateOf(0) }
@@ -487,7 +490,7 @@ private fun SpeedMatchGame(
     tts: TtsSpeaker,
     onFinished: (title: String, level: CefrLevel, xp: Long, accuracyPct: Long, wordsCount: Int) -> Unit
 ) {
-    var seed by remember(weekNumber, sessionNumber) { mutableIntStateOf(0) }
+    var seed by remember(weekNumber, sessionNumber) { mutableIntStateOf(kotlin.random.Random.nextInt(10000)) }
     val boardWords = remember(weekNumber, sessionNumber, seed) { words.shuffled().take(4) }
     val shuffledAr = remember(weekNumber, sessionNumber, seed) { boardWords.shuffled() }
     var pickedWordId by remember(weekNumber, sessionNumber, seed) { mutableStateOf<String?>(null) }

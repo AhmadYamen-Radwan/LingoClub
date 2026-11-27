@@ -30,9 +30,11 @@ import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TheaterComedy
 import com.example.data.model.EvidenceCard
 import androidx.compose.material3.Button
@@ -100,6 +102,8 @@ enum class ArcadeMode(val label: String, val icon: ImageVector) {
     DETECTIVE("Word Detective", Icons.Filled.Search),
     CRIME_MYSTERY("Crime Mystery", Icons.Filled.Security),
     EVIDENCE_BOARD("Evidence Board", Icons.Filled.PushPin),
+    VAULT_CODEBREAKER("Vault Cracker", Icons.Filled.LockOpen),
+    SPEED_DUEL("Speed Duel", Icons.Filled.Speed),
     MEMORY_3D("3D Memory", Icons.Filled.GridView),
     SPIN_WHEEL("Spin Wheel", Icons.Filled.Casino)
 }
@@ -432,6 +436,24 @@ fun GamesArcadeScreen(
                         onFinished = { xp, acc, count, combo ->
                             latestShoutout = "🔍 Solved a Crime Mystery case (+$xp XP)!"
                             onRecordArcadeResult("Crime Mystery", activeLevel, xp, acc, count, combo)
+                        }
+                    )
+                    ArcadeMode.VAULT_CODEBREAKER -> VaultCodebreakerGame(
+                        words = wordPool,
+                        selectedLevel = selectedLevel,
+                        onShareScore = ::openChatWithShoutout,
+                        onFinished = { xp, acc, count, combo ->
+                            latestShoutout = "🔐 Cracked the Vault Cipher (+$xp XP)!"
+                            onRecordArcadeResult("Vault Codebreaker", activeLevel, xp, acc, count, combo)
+                        }
+                    )
+                    ArcadeMode.SPEED_DUEL -> MysteryOddOneSpeedDuelGame(
+                        words = wordPool,
+                        selectedLevel = selectedLevel,
+                        onShareScore = ::openChatWithShoutout,
+                        onFinished = { xp, acc, count, combo ->
+                            latestShoutout = "⚡ Won Mystery Speed Duel (+$xp XP, ${combo}x streak)!"
+                            onRecordArcadeResult("Mystery Speed Duel", activeLevel, xp, acc, count, combo)
                         }
                     )
                     ArcadeMode.EVIDENCE_BOARD -> EvidenceBoardScreen(

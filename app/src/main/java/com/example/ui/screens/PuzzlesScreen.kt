@@ -67,11 +67,13 @@ import com.example.data.model.CollocationPair
 import com.example.data.model.MatchPuzzleSet
 import com.example.data.model.SentencePuzzle
 import com.example.data.model.TeamChannel
+import com.example.ui.PuzzleSessionStats
 import com.example.ui.UiState
 import com.example.ui.components.CefrBadge
 import com.example.ui.components.CefrFilterRow
 import com.example.ui.components.InGameChatActionButton
 import com.example.ui.components.InGameSquadChatSheet
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.Trophy3DFigure
 import com.example.ui.theme.IndigoOnSoft
 import com.example.ui.theme.IndigoSoft
@@ -88,6 +90,8 @@ private enum class PuzzleMode(val label: String) {
 @Composable
 fun PuzzlesScreen(
     onAwardXp: (Long) -> Unit,
+    puzzleStats: PuzzleSessionStats = PuzzleSessionStats(),
+    onRecordPuzzleSolved: (title: String, level: CefrLevel, xp: Long) -> Unit = { _, _, _ -> },
     clubContentState: UiState<List<ClubContentItem>> = UiState.Success(emptyList()),
     selectedLevel: CefrLevel? = null,
     onSelectLevel: (CefrLevel?) -> Unit = {},
@@ -178,22 +182,55 @@ fun PuzzlesScreen(
                 }
             }
 
+            if (puzzleStats.puzzlesSolved > 0) {
+                item {
+                    Surface(
+                        color = IndigoSoft,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Solved: ${puzzleStats.puzzlesSolved} • Streak: ${puzzleStats.currentStreak}x",
+                                color = IndigoOnSoft,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Adaptive: ${puzzleStats.adaptiveLevel.label}",
+                                color = IndigoOnSoft,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
             item {
+                val reportSolved: (String, CefrLevel, Long) -> Unit = { title, lvl, xp ->
+                    onAwardXp(xp)
+                    onRecordPuzzleSolved(title, lvl, xp)
+                }
                 when (mode) {
                     PuzzleMode.SCRAMBLE -> SentenceScrambleView(
                         clubPuzzles = clubPuzzles,
                         selectedLevel = selectedLevel,
-                        onAwardXp = onAwardXp
+                        onAwardXp = { xp -> reportSolved("Sentence Scramble", selectedLevel ?: puzzleStats.adaptiveLevel, xp) }
                     )
                     PuzzleMode.MATCH -> MatchPairsView(
                         clubPuzzles = clubPuzzles,
                         selectedLevel = selectedLevel,
-                        onAwardXp = onAwardXp
+                        onAwardXp = { xp -> reportSolved("Collocation Match", selectedLevel ?: puzzleStats.adaptiveLevel, xp) }
                     )
                     PuzzleMode.GAP_FILL -> GapFillView(
                         clubPuzzles = clubPuzzles,
                         selectedLevel = selectedLevel,
-                        onAwardXp = onAwardXp
+                        onAwardXp = { xp -> reportSolved("Gap-Fill Forge", selectedLevel ?: puzzleStats.adaptiveLevel, xp) }
                     )
                 }
             }
@@ -275,7 +312,7 @@ private fun SentenceScrambleView(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
+                TranslatableEnglishText(
                     text = puzzle.promptHint,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
@@ -437,7 +474,11 @@ private fun SentenceScrambleView(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
-                            Text(text = puzzle.explanation, color = MintOnSoft)
+                            TranslatableEnglishText(
+                                text = puzzle.explanation,
+                                color = MintOnSoft,
+                                underlineColor = MintOnSoft
+                            )
                         }
                     }
                     Button(
@@ -794,7 +835,11 @@ private fun GapFillView(
                         fontWeight = FontWeight.Bold
                     )
                     if (isCorrect) {
-                        Text(cloze.explanation, color = resultColor)
+                        TranslatableEnglishText(
+                            text = cloze.explanation,
+                            color = resultColor,
+                            underlineColor = resultColor
+                        )
                         Button(
                             onClick = {
                                 index = if (clozes.size > 1) {

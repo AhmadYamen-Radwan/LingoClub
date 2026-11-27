@@ -50,6 +50,7 @@ import com.example.data.model.EvidenceCard
 import com.example.ui.components.CelebrationConfettiBurst
 import com.example.ui.components.CefrBadge
 import com.example.ui.components.CefrFilterRow
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.Trophy3DFigure
 import com.example.ui.theme.AmberOnSoft
 import com.example.ui.theme.AmberSoft
@@ -286,21 +287,23 @@ fun EvidenceBoardScreen(
                             color = if (pinned) AmberOnSoft else MaterialTheme.colorScheme.onSurface
                         )
 
-                        Text(
+                        TranslatableEnglishText(
                             text = item.description,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (pinned) AmberOnSoft.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (pinned) AmberOnSoft.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            underlineColor = if (pinned) AmberOnSoft else MaterialTheme.colorScheme.primary
                         )
 
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = if (pinned) Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         ) {
-                            Text(
+                            TranslatableEnglishText(
                                 text = "English clue: \"${item.englishClue}\" — Arabic: ${item.arabicMeaning}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (pinned) AmberOnSoft else MaterialTheme.colorScheme.onSurface,
+                                underlineColor = if (pinned) AmberOnSoft else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(10.dp)
                             )
                         }

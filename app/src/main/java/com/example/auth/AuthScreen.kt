@@ -33,11 +33,15 @@ import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.TheaterComedy
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -70,13 +74,15 @@ import com.example.ui.components.Mascot3DStageBadge
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AuthScreen(
-    onAuthSuccess: () -> Unit
+    onAuthSuccess: () -> Unit,
+    onContinueOffline: (displayName: String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isCheckingSession by remember { mutableStateOf(true) }
+    var offlineNick by remember { mutableStateOf("Detective") }
 
     LaunchedEffect(Unit) {
         // Yield past the initial frame so SurfaceSyncGroup finishes before Credential Manager IPC starts.
@@ -295,6 +301,40 @@ fun AuthScreen(
                                 errorMessage = msg
                             }
                         )
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        OutlinedTextField(
+                            value = offlineNick,
+                            onValueChange = { offlineNick = it.take(24) },
+                            label = { Text("Offline / Hotspot Nickname") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("offline_nickname_input")
+                        )
+
+                        OutlinedButton(
+                            onClick = {
+                                onContinueOffline(offlineNick.trim().ifBlank { "Offline Explorer" })
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("continue_offline_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.WifiOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "  Continue Offline / Wi-Fi Hotspot",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }

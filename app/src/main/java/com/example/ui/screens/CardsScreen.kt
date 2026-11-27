@@ -83,6 +83,7 @@ import com.example.data.model.ClubContentType
 import com.example.data.model.CustomDeck
 import com.example.data.model.FlashcardItem
 import com.example.ui.UiState
+import com.example.ui.components.TranslatableEnglishText
 import com.example.ui.components.CefrBadge
 import com.example.ui.components.CefrFilterRow
 import com.example.ui.components.Trophy3DFigure
@@ -866,10 +867,11 @@ private fun FlashcardStudyView(
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                                 if (card.example.isNotBlank()) {
-                                    Text(
+                                    TranslatableEnglishText(
                                         text = "\"${card.example}\"",
                                         style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                                        underlineColor = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
                             }
@@ -889,7 +891,7 @@ private fun FlashcardStudyView(
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary
                                         )
-                                        Text(
+                                        TranslatableEnglishText(
                                             text = card.teachingTip,
                                             style = MaterialTheme.typography.bodyMedium
                                         )
